@@ -266,6 +266,7 @@ backup_existing /usr/local/bin/lilhouse-router-health-probe-run
 backup_existing /usr/local/bin/lilhouse-router-live-preflight
 backup_existing /usr/local/bin/lilhouse-router-live-backup
 backup_existing /usr/local/bin/lilhouse-router-rollback-guard
+backup_existing /usr/local/bin/lilhouse-router-rollback-start
 backup_existing /usr/local/bin/lilhouse-router-live-apply-executor-plan
 backup_existing /usr/local/bin/lilhouse-router-final-deploy-runbook
 backup_existing /usr/local/bin/lilhouse-router-release-candidate
@@ -323,6 +324,7 @@ install -m 0755 "$REPO_DIR/bin/lilhouse-router-health-probe-run" "$(root_path /u
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-live-preflight" "$(root_path /usr/local/bin/lilhouse-router-live-preflight)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-live-backup" "$(root_path /usr/local/bin/lilhouse-router-live-backup)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-rollback-guard" "$(root_path /usr/local/bin/lilhouse-router-rollback-guard)"
+install -m 0755 "$REPO_DIR/bin/lilhouse-router-rollback-start" "$(root_path /usr/local/bin/lilhouse-router-rollback-start)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-live-apply-executor-plan" "$(root_path /usr/local/bin/lilhouse-router-live-apply-executor-plan)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-final-deploy-runbook" "$(root_path /usr/local/bin/lilhouse-router-final-deploy-runbook)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-release-candidate" "$(root_path /usr/local/bin/lilhouse-router-release-candidate)"
