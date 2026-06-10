@@ -445,6 +445,47 @@ Live router safety rule:
 Do not enable apply mode until backup, validation, and rollback have their own smoke-tested path.
 EOF
 
+VALIDATION_FILE="$PREVIEW_ROOT/VALIDATION-CHECKLIST.txt"
+
+cat >"$VALIDATION_FILE" <<EOF
+LilHouse router deploy validation checklist
+
+This file is generated for planning only.
+No validation has been applied to the live system.
+
+Before any future apply mode, the installer must verify:
+
+Interface checks:
+- WAN interface exists: $WAN
+- LAN interface exists: $LAN
+- WAN and LAN are not the same interface
+- LAN static address does not conflict with an existing live address
+- LAN subnet is valid: $SUBNET
+
+Config syntax checks:
+- systemd-networkd preview files parse cleanly
+- sysctl preview values are valid
+- nftables preview can be checked without applying
+- Unbound preview config can be checked without replacing live config
+- Pi-hole DNS/DHCP changes are translated through a version-aware method, not blind overwrite
+
+Service checks:
+- required commands exist before enabling timers
+- generated systemd units pass systemd-analyze verify
+- timers are disabled by default until apply mode confirms install
+
+Safety checks:
+- backup directory exists and is writable
+- rollback plan exists
+- current SSH/admin session is protected from lockout
+- firewall changes are staged with a timed rollback guard
+- DNS/DHCP restart has a fallback path
+- apply mode requires explicit confirmation
+
+Live router safety rule:
+Dry-run may generate files. Apply mode must validate, back up, stage, test, and only then activate.
+EOF
+
 echo "LilHouse router wizard plan generated."
 echo
 echo "No system changes were made."
