@@ -1407,4 +1407,55 @@ assert report["summary"]["safe_to_apply_live"] is False
 assert report["summary"]["next_gate"] == "rollback-arm"
 PYJSON
 
+
+echo
+echo "== run rollback guard unit command against fake root =="
+
+ROLLBACK_GUARD_ROOT="$TMP_STATE/rollback-guard-root"
+ROLLBACK_GUARD_JSON="$TMP_STATE/rollback-guard.json"
+
+set +e
+"$REPO_DIR/bin/lilhouse-router-rollback-guard" \
+  --backup-report "$LIVE_BACKUP_DIR/live-backup-report.json" \
+  --target-root "$ROLLBACK_GUARD_ROOT" >"$TMP_STATE/rollback-guard-refusal.json"
+ROLLBACK_GUARD_REFUSAL_RC=$?
+set -e
+test "$ROLLBACK_GUARD_REFUSAL_RC" -eq 2
+
+"$REPO_DIR/bin/lilhouse-router-rollback-guard" \
+  --backup-report "$LIVE_BACKUP_DIR/live-backup-report.json" \
+  --target-root "$ROLLBACK_GUARD_ROOT" \
+  --timeout-minutes 5 \
+  --yes \
+  --out "$ROLLBACK_GUARD_JSON" >"$TMP_STATE/rollback-guard.out"
+
+test -f "$ROLLBACK_GUARD_ROOT/etc/systemd/system/lilhouse-router-rollback.service"
+test -f "$ROLLBACK_GUARD_ROOT/etc/systemd/system/lilhouse-router-rollback.timer"
+grep -q "lilhouse-router-restore-create" "$ROLLBACK_GUARD_ROOT/etc/systemd/system/lilhouse-router-rollback.service"
+grep -q "OnActiveSec=5min" "$ROLLBACK_GUARD_ROOT/etc/systemd/system/lilhouse-router-rollback.timer"
+
+python3 - "$ROLLBACK_GUARD_JSON" <<'PYJSON'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text())
+assert report["schema"] == "lilhouse.router_rollback_guard.v1"
+assert report["ok"] is True
+assert report["safety"]["apply"] is False
+assert report["safety"]["copies_files"] is True
+assert report["safety"]["writes_unit_files"] is True
+assert report["safety"]["runs_services"] is False
+assert report["safety"]["starts_timer"] is False
+assert report["safety"]["modifies_router_config"] is False
+assert report["safety"]["touches_network"] is False
+assert report["safety"]["touches_firewall"] is False
+assert report["summary"]["rollback_units_created"] is True
+assert report["summary"]["rollback_timer_started"] is False
+assert report["summary"]["ready_for_rollback_start"] is True
+assert report["summary"]["ready_for_live_apply"] is False
+assert report["summary"]["safe_to_apply_live"] is False
+assert report["summary"]["next_gate"] == "rollback-start"
+PYJSON
+
 echo "Smoke test passed."
