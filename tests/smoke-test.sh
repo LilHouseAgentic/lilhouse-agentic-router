@@ -38,6 +38,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-apply-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-apply-create"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-apply-validate"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-full-dress-rehearsal"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-readiness"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -457,6 +458,22 @@ assert data["summary"]["apply_dry_run_ok"] is True
 assert data["summary"]["apply_create_ok"] is True
 assert data["summary"]["apply_validate_ok"] is True
 assert data["summary"]["validated_missing_after_copy"] == 0
+assert data["summary"]["safe_to_apply_live"] is False
+PYJSON
+
+"$REPO_DIR/bin/lilhouse-router-live-readiness" "$DRESS_OUT/full-dress-rehearsal-report.json" >"$TMP_STATE/router-live-readiness.json"
+python3 -m json.tool "$TMP_STATE/router-live-readiness.json" >/dev/null
+
+python3 - "$TMP_STATE/router-live-readiness.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_live_readiness.v1"
+assert data["apply"] is False
+assert data["live_changes"] is False
+assert data["ok"] is True
+assert data["ready_for_live_apply"] is False
+assert data["summary"]["non_live_pipeline_proven"] is True
+assert data["summary"]["critical_blocker_count"] >= 1
 assert data["summary"]["safe_to_apply_live"] is False
 PYJSON
 

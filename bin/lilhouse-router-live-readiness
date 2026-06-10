@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+BLOCKERS = [
+    {
+        "id": "timed_rollback_executor",
+        "severity": "critical",
+        "status": "missing",
+        "reason": "Live apply must arm an automatic rollback before changing firewall/network files.",
+    },
+    {
+        "id": "live_apply_confirmation_gate",
+        "severity": "critical",
+        "status": "missing",
+        "reason": "Live apply needs explicit multi-step confirmation, not just --yes.",
+    },
+    {
+        "id": "live_backup_path_policy",
+        "severity": "high",
+        "status": "partial",
+        "reason": "Backup tools exist, but live apply must enforce fresh verified backup immediately before copying.",
+    },
+    {
+        "id": "service_activation_policy",
+        "severity": "high",
+        "status": "planned",
+        "reason": "Service reload/start order is planned but not implemented as a live executor.",
+    },
+    {
+        "id": "post_apply_health_probe",
+        "severity": "high",
+        "status": "planned",
+        "reason": "Live apply must prove SSH/admin path, LAN gateway, DNS, DHCP, WAN, and rollback cancellation.",
+    },
+    {
+        "id": "live_root_copy_executor",
+        "severity": "critical",
+        "status": "intentionally_blocked",
+        "reason": "Current apply-create refuses /, which is correct until rollback and health checks exist.",
+    },
+]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Assess whether LilHouse router deploy is ready for live / apply."
+    )
+    parser.add_argument("full_dress_report", help="full-dress-rehearsal-report.json or JSON output.")
+    args = parser.parse_args()
+
+    report_path = Path(args.full_dress_report).resolve()
+    if not report_path.is_file():
+        print(f"ERROR: full dress rehearsal report not found: {report_path}", file=sys.stderr)
+        return 1
+
+    dress = json.loads(report_path.read_text(encoding="utf-8"))
+
+    checks = [
+        {
+            "name": "full_dress_schema",
+            "ok": dress.get("schema") == "lilhouse.router_full_dress_rehearsal.v1",
+        },
+        {
+            "name": "full_dress_ok",
+            "ok": dress.get("ok") is True,
+        },
+        {
+            "name": "preflight_ok",
+            "ok": dress.get("summary", {}).get("preflight_ok") is True,
+        },
+        {
+            "name": "apply_plan_ok",
+            "ok": dress.get("summary", {}).get("apply_plan_ok") is True,
+        },
+        {
+            "name": "apply_dry_run_ok",
+            "ok": dress.get("summary", {}).get("apply_dry_run_ok") is True,
+        },
+        {
+            "name": "apply_create_ok",
+            "ok": dress.get("summary", {}).get("apply_create_ok") is True,
+        },
+        {
+            "name": "apply_validate_ok",
+            "ok": dress.get("summary", {}).get("apply_validate_ok") is True,
+        },
+        {
+            "name": "non_live_only",
+            "ok": dress.get("live_changes") is False and dress.get("live_root_allowed") is False,
+        },
+    ]
+
+    critical_blockers = [b for b in BLOCKERS if b["severity"] == "critical"]
+    checks_ok = all(c["ok"] for c in checks)
+
+    result = {
+        "schema": "lilhouse.router_live_readiness.v1",
+        "mode": "live-readiness",
+        "apply": False,
+        "live_changes": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "full_dress_report": str(report_path),
+        "ready_for_live_apply": False,
+        "ok": checks_ok,
+        "checks": checks,
+        "blockers": BLOCKERS,
+        "summary": {
+            "non_live_pipeline_proven": checks_ok,
+            "blocker_count": len(BLOCKERS),
+            "critical_blocker_count": len(critical_blockers),
+            "safe_to_apply_live": False,
+            "next_required_milestone": "timed rollback executor",
+        },
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if checks_ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
