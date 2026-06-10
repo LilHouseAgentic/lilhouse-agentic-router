@@ -99,4 +99,23 @@ test -s "$TMP_STATE/router-wizard/router-plan.json"
 test -s "$TMP_STATE/router-wizard/router-plan-summary.txt"
 
 echo
+echo
+echo "== run installer router-deploy dry-run wizard =="
+
+WIZARD_OUT="$TMP_STATE/install-router-wizard"
+WIZARD_LOG="$TMP_STATE/install-router-wizard.out"
+./install.sh --mode router-deploy --wizard --dry-run --out-dir "$WIZARD_OUT" >"$WIZARD_LOG"
+
+test -f "$WIZARD_OUT/interface-report.json"
+test -f "$WIZARD_OUT/router-plan.json"
+test -f "$WIZARD_OUT/router-plan-summary.txt"
+
+grep -q "lan_static_address" "$WIZARD_OUT/router-plan-summary.txt"
+grep -q "forwarding" "$WIZARD_OUT/router-plan-summary.txt"
+grep -q "firewall_nat" "$WIZARD_OUT/router-plan-summary.txt"
+grep -q "dns" "$WIZARD_OUT/router-plan-summary.txt"
+grep -q "dhcp" "$WIZARD_OUT/router-plan-summary.txt"
+grep -q "worker_timers" "$WIZARD_OUT/router-plan-summary.txt"
+grep -q "No system changes" "$WIZARD_LOG"
+
 echo "Smoke test passed."
