@@ -213,6 +213,7 @@ backup_existing /usr/local/bin/lilhouse-router-service-activation-dry-run
 backup_existing /usr/local/bin/lilhouse-router-service-activation-rehearsal
 backup_existing /usr/local/bin/lilhouse-router-live-readiness-review
 backup_existing /usr/local/bin/lilhouse-router-health-probe-plan
+backup_existing /usr/local/bin/lilhouse-router-health-probe-dry-run
 backup_existing /usr/local/bin/lilhouse-status
 backup_existing /etc/systemd/system/lilhouse-current-state.service
 backup_existing /etc/systemd/system/lilhouse-current-state.timer
@@ -260,6 +261,7 @@ install -m 0755 "$REPO_DIR/bin/lilhouse-router-service-activation-dry-run" "$(ro
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-service-activation-rehearsal" "$(root_path /usr/local/bin/lilhouse-router-service-activation-rehearsal)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-live-readiness-review" "$(root_path /usr/local/bin/lilhouse-router-live-readiness-review)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-health-probe-plan" "$(root_path /usr/local/bin/lilhouse-router-health-probe-plan)"
+install -m 0755 "$REPO_DIR/bin/lilhouse-router-health-probe-dry-run" "$(root_path /usr/local/bin/lilhouse-router-health-probe-dry-run)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-status" "$(root_path /usr/local/bin/lilhouse-status)"
 
 install -m 0644 "$REPO_DIR/systemd/lilhouse-current-state.service" "$(root_path /etc/systemd/system/lilhouse-current-state.service)"

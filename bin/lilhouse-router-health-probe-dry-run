@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Dry-run future health probe evaluation using simulated probe results."
+    )
+    parser.add_argument("health_probe_plan")
+    parser.add_argument("--results", required=True, help="JSON object mapping probe id to true/false.")
+    args = parser.parse_args()
+
+    plan_path = Path(args.health_probe_plan).resolve()
+    results_path = Path(args.results).resolve()
+
+    if not plan_path.is_file():
+        print(f"ERROR: health probe plan not found: {plan_path}", file=sys.stderr)
+        return 1
+    if not results_path.is_file():
+        print(f"ERROR: results file not found: {results_path}", file=sys.stderr)
+        return 1
+
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    results = json.loads(results_path.read_text(encoding="utf-8"))
+
+    errors = []
+    if plan.get("schema") != "lilhouse.router_health_probe_plan.v1":
+        errors.append("input is not a health probe plan")
+    if plan.get("ok") is not True:
+        errors.append("health probe plan is not OK")
+    if plan.get("apply") is not False:
+        errors.append("health probe plan must be non-applying")
+    if plan.get("live_changes") is not False:
+        errors.append("health probe plan must declare live_changes false")
+    if plan.get("runs_probes") is not False:
+        errors.append("health probe plan must not run probes")
+    if not isinstance(results, dict):
+        errors.append("results JSON must be an object mapping probe id to boolean")
+
+    evaluated = []
+    if not errors:
+        for probe in sorted(plan.get("probes", []), key=lambda item: item.get("order", 0)):
+            probe_id = probe.get("id")
+            supplied = results.get(probe_id)
+
+            if supplied is True:
+                status = "pass"
+                passed = True
+            elif supplied is False:
+                status = "fail"
+                passed = False
+            else:
+                status = "missing"
+                passed = False
+
+            evaluated.append({
+                "order": probe.get("order"),
+                "id": probe_id,
+                "status": status,
+                "passed": passed,
+                "required": probe.get("required") is True,
+                "target": probe.get("target"),
+                "failure_action": probe.get("failure_action"),
+                "runs_probe": False,
+            })
+
+    required = [item for item in evaluated if item["required"]]
+    required_failed = [item for item in required if not item["passed"]]
+    all_required_passed = bool(required) and not required_failed
+
+    result = {
+        "schema": "lilhouse.router_health_probe_dry_run.v1",
+        "mode": "health-probe-dry-run",
+        "apply": False,
+        "live_changes": False,
+        "runs_probes": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "health_probe_plan": str(plan_path),
+        "results": str(results_path),
+        "ok": not errors,
+        "error_count": len(errors),
+        "errors": errors,
+        "evaluated": evaluated,
+        "summary": {
+            "probe_count": len(evaluated),
+            "required_probe_count": len(required),
+            "required_failed_count": len(required_failed),
+            "all_required_probes_passed": all_required_passed,
+            "rollback_cancel_allowed_by_probes": all_required_passed,
+            "safe_to_cancel_rollback_now": False,
+            "safe_to_apply_live": False,
+        },
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
