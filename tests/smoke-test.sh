@@ -873,6 +873,32 @@ assert data["summary"]["critical_blocker_count"] >= 1
 assert data["summary"]["safe_to_apply_live"] is False
 PYJSON
 
+
+RESTORE_GUARD_SOURCE="$TMP_STATE/router-restore-guard-source"
+RESTORE_GUARD_BACKUP="$TMP_STATE/router-restore-guard-backup"
+RESTORE_GUARD_FAKE_ROOT="$TMP_STATE/router-restore-guard-fake-root"
+
+mkdir -p "$RESTORE_GUARD_SOURCE/etc/pihole" "$RESTORE_GUARD_SOURCE/etc/systemd/system" "$RESTORE_GUARD_SOURCE/etc/sysctl.d"
+echo "# fake nftables" > "$RESTORE_GUARD_SOURCE/etc/nftables.conf"
+echo "net.ipv4.ip_forward=1" > "$RESTORE_GUARD_SOURCE/etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+echo "# fake pihole" > "$RESTORE_GUARD_SOURCE/etc/pihole/test.conf"
+echo "# fake current-state service" > "$RESTORE_GUARD_SOURCE/etc/systemd/system/lilhouse-current-state.service"
+
+"$REPO_DIR/bin/lilhouse-router-backup-create" \
+  --root "$RESTORE_GUARD_SOURCE" \
+  --backup-dir "$RESTORE_GUARD_BACKUP" \
+  --yes >"$TMP_STATE/router-restore-guard-backup.json"
+
+set +e
+"$REPO_DIR/bin/lilhouse-router-restore-create" "$RESTORE_GUARD_BACKUP" --root / --yes >"$TMP_STATE/router-restore-live-root-refuse.json" 2>"$TMP_STATE/router-restore-live-root-refuse.err"
+RESTORE_LIVE_ROOT_EXIT=$?
+set -e
+test "$RESTORE_LIVE_ROOT_EXIT" -eq 2
+grep -q "refusing to restore into live / without --allow-live-root" "$TMP_STATE/router-restore-live-root-refuse.err"
+
+"$REPO_DIR/bin/lilhouse-router-restore-create" "$RESTORE_GUARD_BACKUP" --root "$RESTORE_GUARD_FAKE_ROOT" --yes >"$TMP_STATE/router-restore-guard-fake-root.json"
+python3 -m json.tool "$TMP_STATE/router-restore-guard-fake-root.json" >/dev/null
+
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
 "$REPO_DIR/bin/lilhouse-router-wizard" \
   --out-dir "$CAKE_WIZARD_OUT" \

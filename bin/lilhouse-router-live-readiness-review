@@ -124,9 +124,9 @@ def main() -> int:
     remaining_blockers = [
         {
             "id": "live_root_restore_guard",
-            "severity": "critical",
-            "status": "missing",
-            "detail": "restore-create still needs an explicit live-root guard before any real rollback service can target /.",
+            "severity": "high",
+            "status": "guarded",
+            "detail": "restore-create refuses live / unless --allow-live-root is explicitly supplied by a future live executor.",
         },
         {
             "id": "real_health_probe_executor",

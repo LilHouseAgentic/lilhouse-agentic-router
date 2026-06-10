@@ -47,11 +47,20 @@ def main() -> int:
         action="store_true",
         help="Required confirmation flag. Without this, no files are restored.",
     )
+    parser.add_argument(
+        "--allow-live-root",
+        action="store_true",
+        help="Explicitly allow restoring into live /. Dangerous; future live executor only.",
+    )
     args = parser.parse_args()
 
     backup_dir = Path(args.backup_dir).resolve()
     root = Path(args.root).resolve()
     report_path = backup_dir / "backup-report.json"
+
+    if root == Path("/") and not args.allow_live_root:
+        print("ERROR: refusing to restore into live / without --allow-live-root", file=sys.stderr)
+        return 2
 
     if not args.yes:
         print("ERROR: refusing to restore files without --yes", file=sys.stderr)
