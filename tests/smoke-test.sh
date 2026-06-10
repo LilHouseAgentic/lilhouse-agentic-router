@@ -1039,6 +1039,11 @@ assert data["ready_for_live_apply"] is False
 assert data["summary"]["non_live_pipeline_proven"] is True
 assert data["summary"]["health_probe_rehearsal_proven"] is True
 assert data["summary"]["safe_to_apply_live"] is False
+assert data["summary"]["critical_blocker_count"] == 1
+assert data["summary"]["high_blocker_count"] >= 3
+assert data["summary"]["guarded_blocker_count"] >= 1
+assert data["summary"]["proven_blocker_count"] >= 2
+assert data["summary"]["only_remaining_critical"] == ["live_apply_root_copy_executor"]
 
 blockers = {item["id"]: item for item in data["remaining_blockers"]}
 assert blockers["real_health_probe_executor"]["status"] == "probe_rehearsal_proven"

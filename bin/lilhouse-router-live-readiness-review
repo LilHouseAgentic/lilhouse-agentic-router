@@ -188,6 +188,12 @@ def main() -> int:
             "service_rehearsal_proven": service.get("ok") is True,
             "remaining_blocker_count": len(remaining_blockers),
             "critical_blocker_count": sum(1 for b in remaining_blockers if b["severity"] == "critical"),
+            "high_blocker_count": sum(1 for b in remaining_blockers if b["severity"] == "high"),
+            "guarded_blocker_count": sum(1 for b in remaining_blockers if b["status"] == "guarded"),
+            "proven_blocker_count": sum(1 for b in remaining_blockers if str(b["status"]).endswith("_proven")),
+            "only_remaining_critical": [
+                b["id"] for b in remaining_blockers if b["severity"] == "critical"
+            ],
             "safe_to_apply_live": False,
         },
     }
