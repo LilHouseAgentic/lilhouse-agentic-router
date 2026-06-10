@@ -111,6 +111,7 @@ test -f "$WIZARD_OUT/router-plan.json"
 test -f "$WIZARD_OUT/router-plan-summary.txt"
 test -f "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
 test -f "$WIZARD_OUT/preview/etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+test -f "$WIZARD_OUT/preview/etc/nftables.conf"
 
 grep -q "LilHouse router deploy preview" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
 grep -q "\[Match\]" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
@@ -119,6 +120,12 @@ grep -q "Address=10.23.0.1/24" "$WIZARD_OUT/preview/etc/systemd/network/20-lilho
 
 grep -q "net.ipv4.ip_forward=1" "$WIZARD_OUT/preview/etc/sysctl.d/90-lilhouse-router-forwarding.conf"
 grep -q "net.ipv6.conf.all.forwarding=0" "$WIZARD_OUT/preview/etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+
+grep -q "table inet lilhouse_filter" "$WIZARD_OUT/preview/etc/nftables.conf"
+grep -q "policy drop" "$WIZARD_OUT/preview/etc/nftables.conf"
+grep -q "iifname \"eth1\" accept" "$WIZARD_OUT/preview/etc/nftables.conf"
+grep -q "iifname \"eth1\" oifname \"eth0\" accept" "$WIZARD_OUT/preview/etc/nftables.conf"
+grep -q "masquerade" "$WIZARD_OUT/preview/etc/nftables.conf"
 
 grep -q "lan_static_address" "$WIZARD_OUT/router-plan-summary.txt"
 grep -q "forwarding" "$WIZARD_OUT/router-plan-summary.txt"
