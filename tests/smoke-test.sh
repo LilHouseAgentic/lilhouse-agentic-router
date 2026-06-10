@@ -1611,4 +1611,55 @@ assert len(report["steps"]) >= 5
 assert all(step["simulated"] is True for step in report["steps"])
 PYJSON
 
+
+echo
+echo "== run post-apply health gate in simulated mode =="
+
+POST_APPLY_HEALTH_JSON="$TMP_STATE/post-apply-health-run.json"
+
+set +e
+"$REPO_DIR/bin/lilhouse-router-post-apply-health-run" \
+  --service-activation-report "$SERVICE_ACTIVATION_JSON" >"$TMP_STATE/post-apply-health-refusal.json"
+POST_APPLY_HEALTH_REFUSAL_RC=$?
+set -e
+test "$POST_APPLY_HEALTH_REFUSAL_RC" -eq 2
+
+"$REPO_DIR/bin/lilhouse-router-post-apply-health-run" \
+  --service-activation-report "$SERVICE_ACTIVATION_JSON" \
+  --wan eth0 \
+  --lan eth1 \
+  --lan-ip 10.23.0.1 \
+  --dns-test-name example.com \
+  --wan-test-ip 1.1.1.1 \
+  --timeout-seconds 1 \
+  --yes \
+  --simulate \
+  --out "$POST_APPLY_HEALTH_JSON" >"$TMP_STATE/post-apply-health.out"
+
+python3 - "$POST_APPLY_HEALTH_JSON" <<'PYJSON'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text())
+assert report["schema"] == "lilhouse.router_post_apply_health.v1"
+assert report["ok"] is True
+assert report["safety"]["apply"] is False
+assert report["safety"]["live_changes"] is False
+assert report["safety"]["copies_files"] is False
+assert report["safety"]["writes_config"] is False
+assert report["safety"]["runs_services"] is False
+assert report["safety"]["starts_router_services"] is False
+assert report["safety"]["restarts_network"] is False
+assert report["safety"]["cancels_rollback"] is False
+assert report["safety"]["rollback_stays_armed"] is True
+assert report["summary"]["post_apply_health_passed"] is True
+assert report["summary"]["rollback_timer_still_armed"] is True
+assert report["summary"]["ready_for_rollback_cancel"] is True
+assert report["summary"]["rollback_cancelled"] is False
+assert report["summary"]["ready_for_live_apply"] is False
+assert report["summary"]["safe_to_apply_live"] is False
+assert report["summary"]["next_gate"] == "rollback-cancel"
+PYJSON
+
 echo "Smoke test passed."

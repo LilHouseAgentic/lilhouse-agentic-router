@@ -1,0 +1,272 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def load_json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception as e:
+        raise SystemExit(f"failed to read JSON {path}: {e}")
+
+
+def run_health_probe(args):
+    probe = Path(__file__).resolve().parent / "lilhouse-router-health-probe-run"
+    if not probe.exists():
+        probe = Path(shutil.which("lilhouse-router-health-probe-run") or "")
+
+    if not probe.exists():
+        return None, {
+            "argv": ["lilhouse-router-health-probe-run"],
+            "ok": False,
+            "stderr": "lilhouse-router-health-probe-run not found",
+            "stdout": "",
+            "returncode": None,
+        }
+
+    cmd = [
+        str(probe),
+        "--allow-live-probes",
+        "--wan", args.wan,
+        "--lan", args.lan,
+        "--lan-ip", args.lan_ip,
+        "--dns-test-name", args.dns_test_name,
+        "--wan-test-ip", args.wan_test_ip,
+        "--timeout-seconds", str(args.timeout_seconds),
+    ]
+
+    for service in args.service:
+        cmd.extend(["--service", service])
+
+    p = subprocess.run(
+        cmd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    result = {
+        "argv": cmd,
+        "returncode": p.returncode,
+        "stdout": p.stdout.strip(),
+        "stderr": p.stderr.strip(),
+        "ok": p.returncode == 0,
+    }
+
+    try:
+        return json.loads(p.stdout), result
+    except Exception:
+        return None, result
+
+
+def simulated_health(args):
+    services = args.service or [
+        "systemd-networkd",
+        "nftables",
+        "unbound",
+        "pihole-FTL",
+        "lilhouse-current-state.timer",
+        "lilhouse-storage-health.timer",
+    ]
+
+    return {
+        "schema": "lilhouse.router_health_probe_run.v1",
+        "ok": True,
+        "mode": "simulated-post-apply-health",
+        "safety": {
+            "apply": False,
+            "live_changes": False,
+            "copies_files": False,
+            "runs_services": False,
+            "writes_config": False,
+            "reads_live_state": False,
+        },
+        "hard_checks": {
+            "wan_present": True,
+            "lan_present": True,
+            "dns_resolution": True,
+            "wan_ping": True,
+        },
+        "probes": {
+            "interfaces": {
+                "wan": args.wan,
+                "lan": args.lan,
+                "wan_present": True,
+                "lan_present": True,
+                "ok": True,
+                "names": [args.wan, args.lan],
+            },
+            "default_route": {"ok": True, "stdout": "simulated default route"},
+            "lan_ip_lookup": {"ok": True, "stdout": f"simulated {args.lan_ip}"},
+            "dns_resolution": {"ok": True, "name": args.dns_test_name, "addresses": ["127.0.0.1"], "error": None},
+            "wan_ping": {"ok": True, "stdout": "simulated ping"},
+            "services": [
+                {"service": service, "ok": True, "active": "active", "returncode": 0, "stderr": ""}
+                for service in services
+            ],
+            "rollback_timer": {
+                "service": "lilhouse-router-rollback.timer",
+                "ok": True,
+                "active": "active",
+                "returncode": 0,
+                "stderr": "",
+            },
+        },
+    }
+
+
+def service_ok(probe_report, service_name):
+    for item in probe_report.get("probes", {}).get("services", []):
+        if item.get("service") == service_name:
+            return item.get("ok") is True or item.get("active") == "active"
+    return False
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Post-apply health gate before rollback cancellation.")
+    ap.add_argument("--service-activation-report", required=True)
+    ap.add_argument("--wan", default="eth0")
+    ap.add_argument("--lan", default="eth1")
+    ap.add_argument("--lan-ip", default="10.23.0.1")
+    ap.add_argument("--dns-test-name", default="example.com")
+    ap.add_argument("--wan-test-ip", default="1.1.1.1")
+    ap.add_argument("--timeout-seconds", type=int, default=3)
+    ap.add_argument("--service", action="append", default=[])
+    ap.add_argument("--yes", action="store_true", help="Required to run post-apply health gate.")
+    ap.add_argument("--allow-live-probes", action="store_true", help="Required unless --simulate is used.")
+    ap.add_argument("--simulate", action="store_true", help="Do not inspect live state; simulate passing health.")
+    ap.add_argument("--out", default="")
+    args = ap.parse_args()
+
+    if not args.yes:
+        print("ERROR: refusing to run post-apply health gate without --yes", file=sys.stderr)
+        return 2
+
+    if not args.simulate and not args.allow_live_probes:
+        print("ERROR: refusing to inspect live health without --allow-live-probes", file=sys.stderr)
+        return 2
+
+    activation = load_json(args.service_activation_report)
+
+    if activation.get("schema") != "lilhouse.router_service_activation.v1":
+        print("ERROR: service activation report schema mismatch", file=sys.stderr)
+        return 2
+
+    if activation.get("ok") is not True:
+        print("ERROR: service activation report is not OK", file=sys.stderr)
+        return 2
+
+    if activation.get("summary", {}).get("ready_for_post_apply_health") is not True:
+        print("ERROR: service activation did not approve post-apply health", file=sys.stderr)
+        return 2
+
+    if activation.get("summary", {}).get("rollback_cancelled") is True:
+        print("ERROR: rollback is already reported cancelled before post-apply health", file=sys.stderr)
+        return 2
+
+    if args.simulate:
+        probe_report = simulated_health(args)
+        probe_command = {"ok": True, "simulated": True}
+    else:
+        probe_report, probe_command = run_health_probe(args)
+
+    if not isinstance(probe_report, dict):
+        probe_report = {}
+
+    hard = probe_report.get("hard_checks", {})
+    probes = probe_report.get("probes", {})
+    interfaces = probes.get("interfaces", {})
+    rollback_timer = probes.get("rollback_timer", {})
+
+    required_services = args.service or [
+        "systemd-networkd",
+        "nftables",
+        "unbound",
+        "pihole-FTL",
+        "lilhouse-current-state.timer",
+        "lilhouse-storage-health.timer",
+    ]
+
+    checks = {
+        "probe_report_ok": probe_report.get("ok") is True,
+        "wan_present": hard.get("wan_present") is True or interfaces.get("wan_present") is True,
+        "lan_present": hard.get("lan_present") is True or interfaces.get("lan_present") is True,
+        "dns_resolution_ok": hard.get("dns_resolution") is True,
+        "wan_ping_ok": hard.get("wan_ping") is True,
+        "default_route_ok": probes.get("default_route", {}).get("ok") is True,
+        "lan_ip_lookup_ok": probes.get("lan_ip_lookup", {}).get("ok") is True,
+        "rollback_timer_still_armed": rollback_timer.get("ok") is True or rollback_timer.get("active") == "active",
+    }
+
+    for service in required_services:
+        checks[f"service_active:{service}"] = service_ok(probe_report, service)
+
+    ok = all(checks.values())
+    failed = [name for name, value in checks.items() if value is not True]
+
+    report = {
+        "schema": "lilhouse.router_post_apply_health.v1",
+        "ok": ok,
+        "generated_at": now_iso(),
+        "mode": "post-apply-health-simulated" if args.simulate else "post-apply-health-live",
+        "inputs": {
+            "service_activation_report": str(Path(args.service_activation_report)),
+            "wan": args.wan,
+            "lan": args.lan,
+            "lan_ip": args.lan_ip,
+            "dns_test_name": args.dns_test_name,
+            "wan_test_ip": args.wan_test_ip,
+            "timeout_seconds": args.timeout_seconds,
+            "services": required_services,
+            "simulate": args.simulate,
+            "allow_live_probes": args.allow_live_probes,
+            "yes": args.yes,
+        },
+        "safety": {
+            "apply": False,
+            "live_changes": False,
+            "copies_files": False,
+            "writes_config": False,
+            "runs_services": False,
+            "starts_router_services": False,
+            "restarts_network": False,
+            "cancels_rollback": False,
+            "rollback_stays_armed": True,
+            "reads_live_state": not args.simulate,
+        },
+        "checks": checks,
+        "failed_checks": failed,
+        "summary": {
+            "post_apply_health_passed": ok,
+            "rollback_timer_still_armed": checks["rollback_timer_still_armed"],
+            "ready_for_rollback_cancel": ok,
+            "rollback_cancelled": False,
+            "ready_for_live_apply": False,
+            "safe_to_apply_live": False,
+            "next_gate": "rollback-cancel",
+        },
+        "health_probe_command": probe_command,
+        "health_probe_report": probe_report,
+    }
+
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if ok else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
