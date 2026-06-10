@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+COMMON="${LILHOUSE_COMMON:-/usr/lib/lilhouse/lilhouse-common.sh}"
+if [ -f "$COMMON" ]; then
+  # shellcheck source=/dev/null
+  . "$COMMON"
+else
+  : "${LILHOUSE_STATE_DIR:=/var/lib/lilhouse}"
+  : "${LILHOUSE_RUNTIME_DIR:=/run/lilhouse}"
+  : "${LILHOUSE_LOG_DIR:=/var/log/lilhouse}"
+  lilhouse_ensure_dirs() { mkdir -p "$LILHOUSE_STATE_DIR" "$LILHOUSE_RUNTIME_DIR" "$LILHOUSE_LOG_DIR"; }
+fi
+
+lilhouse_ensure_dirs
+
+OUT="${LILHOUSE_CURRENT_STATE_FILE:-$LILHOUSE_STATE_DIR/current-state.json}"
+WAN_IF="${LILHOUSE_WAN_IF:-eth0}"
+LAN_IF="${LILHOUSE_LAN_IF:-eth1}"
+
+python3 - "$OUT" "$WAN_IF" "$LAN_IF" "$LILHOUSE_STATE_DIR" <<'PY'
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+out, wan_if, lan_if, state_dir = sys.argv[1:5]
+
+def run(cmd):
+    try:
+        return subprocess.run(
+            cmd,
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception as exc:
+        return None
+
+def cmd_text(cmd):
+    r = run(cmd)
+    if r is None:
+        return ""
+    return (r.stdout or "").strip()
+
+def service_state(name):
+    r = run(["systemctl", "is-active", name])
+    if r is None:
+        return "unknown"
+    return (r.stdout or r.stderr or "unknown").strip()
+
+def iface_state(name):
+    carrier = Path(f"/sys/class/net/{name}/carrier")
+    operstate = Path(f"/sys/class/net/{name}/operstate")
+    exists = Path(f"/sys/class/net/{name}").exists()
+    return {
+        "name": name,
+        "exists": exists,
+        "carrier": carrier.read_text().strip() if carrier.exists() else "unknown",
+        "operstate": operstate.read_text().strip() if operstate.exists() else "unknown",
+    }
+
+def disk_summary(path):
+    try:
+        usage = shutil.disk_usage(path)
+        return {
+            "path": path,
+            "total_bytes": usage.total,
+            "used_bytes": usage.used,
+            "free_bytes": usage.free,
+            "used_percent": round((usage.used / usage.total) * 100, 2) if usage.total else None,
+        }
+    except Exception as exc:
+        return {"path": path, "error": str(exc)}
+
+def count_jsonl(path):
+    p = Path(path)
+    if not p.exists():
+        return 0
+    try:
+        with p.open("r", encoding="utf-8", errors="replace") as f:
+            return sum(1 for _ in f)
+    except Exception:
+        return 0
+
+state = {
+    "ts": datetime.now(timezone.utc).astimezone().isoformat(),
+    "hostname": socket.gethostname(),
+    "interfaces": {
+        "wan": iface_state(wan_if),
+        "lan": iface_state(lan_if),
+    },
+    "routes": {
+        "ipv4_default": cmd_text(["sh", "-c", "ip route show default 2>/dev/null | head -1"]),
+        "ipv6_default": cmd_text(["sh", "-c", "ip -6 route show default 2>/dev/null | head -1"]),
+    },
+    "services": {
+        "pihole_ftl": service_state("pihole-FTL.service"),
+        "unbound": service_state("unbound.service"),
+        "docker": service_state("docker.service"),
+    },
+    "qdisc": {
+        "summary": cmd_text(["sh", "-c", "tc qdisc show 2>/dev/null | head -20"]),
+    },
+    "storage": {
+        "state_dir": disk_summary(state_dir),
+        "root": disk_summary("/"),
+    },
+    "ledgers": {
+        "events_count": count_jsonl(str(Path(state_dir) / "events.jsonl")),
+        "actions_count": count_jsonl(str(Path(state_dir) / "actions.jsonl")),
+        "proposals_count": count_jsonl(str(Path(state_dir) / "proposals.jsonl")),
+    },
+}
+
+Path(out).parent.mkdir(parents=True, exist_ok=True)
+Path(out).write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+print(out)
+PY
