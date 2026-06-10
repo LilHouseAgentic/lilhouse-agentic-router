@@ -62,6 +62,34 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+if [ "$MODE" = "router-deploy" ]; then
+  echo "Router-deploy mode is planned but not implemented yet."
+  echo
+  echo "This future mode will configure WAN/LAN, forwarding, firewall/NAT, DHCP, Pi-hole, Unbound, CAKE/SQM, and worker timers."
+  echo "For now, use observe-only mode:"
+  echo
+  echo "  sudo ./install.sh --mode observe-only"
+  echo
+  echo "No changes made."
+  exit 2
+fi
+
+if [ "$WIZARD" -eq 1 ]; then
+  echo "--wizard is reserved for future router-deploy mode."
+  echo "No changes made."
+  exit 2
+fi
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "Dry-run requested."
+  echo "Observe-only mode currently supports safe fake-root testing with:"
+  echo
+  echo "  ./install.sh --destdir /tmp/lilhouse-install-test"
+  echo
+  echo "No changes made."
+  exit 0
+fi
+
 if [ -z "$DESTDIR" ] && [ "${EUID:-$(id -u)}" -ne 0 ]; then
   echo "Please run as root: sudo ./install.sh"
   echo "For safe test install, use: ./install.sh --destdir /tmp/lilhouse-install-test"
