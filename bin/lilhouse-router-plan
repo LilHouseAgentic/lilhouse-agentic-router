@@ -110,6 +110,15 @@ plan = {
             "intent": "Enable packet forwarding for router operation.",
             "risk": "high",
             "apply_status": "not_implemented",
+            "planned_files": [
+                "/etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+            ],
+            "planned_settings": {
+                "net.ipv4.ip_forward": 1,
+                "net.ipv6.conf.all.forwarding": 1 if args.enable_ipv6 else 0,
+                "ipv6_forwarding_requested": args.enable_ipv6,
+                "comment": "Forwarding blueprint only. No sysctl files are written by this command."
+            },
         },
         {
             "name": "firewall_nat",
