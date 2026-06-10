@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Dry-run post-apply health evaluation from supplied simulated check results."
+    )
+    parser.add_argument("health_plan", help="post-apply health plan JSON.")
+    parser.add_argument("--results", required=True, help="JSON object mapping health check id to true/false.")
+    args = parser.parse_args()
+
+    plan_path = Path(args.health_plan).resolve()
+    results_path = Path(args.results).resolve()
+
+    if not plan_path.is_file():
+        print(f"ERROR: health plan not found: {plan_path}", file=sys.stderr)
+        return 1
+    if not results_path.is_file():
+        print(f"ERROR: health results file not found: {results_path}", file=sys.stderr)
+        return 1
+
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    supplied_results = json.loads(results_path.read_text(encoding="utf-8"))
+
+    errors = []
+    if plan.get("schema") != "lilhouse.router_post_apply_health_plan.v1":
+        errors.append("input is not a post-apply health plan")
+    if plan.get("ok") is not True:
+        errors.append("health plan is not OK")
+    if plan.get("apply") is not False:
+        errors.append("health plan must be non-applying")
+    if plan.get("live_changes") is not False:
+        errors.append("health plan must declare live_changes false")
+    if not isinstance(supplied_results, dict):
+        errors.append("results JSON must be an object mapping check id to boolean")
+
+    evaluated = []
+    if not errors:
+        for check in plan.get("checks", []):
+            check_id = check.get("id")
+            required = check.get("required") is True
+            value = supplied_results.get(check_id)
+
+            if value is True:
+                status = "pass"
+            elif value is False:
+                status = "fail"
+            else:
+                status = "missing"
+
+            evaluated.append(
+                {
+                    "id": check_id,
+                    "required": required,
+                    "status": status,
+                    "passed": value is True,
+                    "failure_action": check.get("failure_action"),
+                }
+            )
+
+    required = [item for item in evaluated if item["required"]]
+    required_passed = [item for item in required if item["passed"]]
+    required_failed = [item for item in required if not item["passed"]]
+    all_required_passed = bool(required) and len(required_failed) == 0
+
+    result = {
+        "schema": "lilhouse.router_post_apply_health_dry_run.v1",
+        "mode": "post-apply-health-dry-run",
+        "apply": False,
+        "live_changes": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "health_plan": str(plan_path),
+        "results": str(results_path),
+        "ok": not errors,
+        "error_count": len(errors),
+        "errors": errors,
+        "evaluated": evaluated,
+        "summary": {
+            "required_check_count": len(required),
+            "required_passed_count": len(required_passed),
+            "required_failed_count": len(required_failed),
+            "all_required_checks_passed": all_required_passed,
+            "rollback_cancel_allowed": all_required_passed,
+            "safe_to_cancel_rollback_now": False,
+            "safe_to_apply_live": False,
+        },
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

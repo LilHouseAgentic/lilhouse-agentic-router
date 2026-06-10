@@ -46,6 +46,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-timed-rollback-rehearsal"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-confirmation-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-confirmation-check"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-post-apply-health-plan"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-post-apply-health-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -641,6 +642,64 @@ assert data["summary"]["rollback_cancel_allowed_only_after_pass"] is True
 assert data["summary"]["safe_to_cancel_rollback_now"] is False
 assert data["summary"]["safe_to_apply_live"] is False
 assert data["summary"]["required_check_count"] >= 6
+PYJSON
+
+cat >"$TMP_STATE/router-post-apply-health-results-fail.json" <<'JSON'
+{
+  "local_admin_path": true,
+  "lan_gateway_reachable": true,
+  "dns_resolution": false,
+  "wan_reachability": true,
+  "dhcp_service_state": true,
+  "firewall_service_state": true,
+  "rollback_timer_state": true
+}
+JSON
+
+cat >"$TMP_STATE/router-post-apply-health-results-pass.json" <<'JSON'
+{
+  "local_admin_path": true,
+  "lan_gateway_reachable": true,
+  "dns_resolution": true,
+  "wan_reachability": true,
+  "dhcp_service_state": true,
+  "firewall_service_state": true,
+  "rollback_timer_state": true
+}
+JSON
+
+"$REPO_DIR/bin/lilhouse-router-post-apply-health-dry-run" \
+  "$TMP_STATE/router-post-apply-health-plan.json" \
+  --results "$TMP_STATE/router-post-apply-health-results-fail.json" >"$TMP_STATE/router-post-apply-health-dry-run-fail.json"
+
+"$REPO_DIR/bin/lilhouse-router-post-apply-health-dry-run" \
+  "$TMP_STATE/router-post-apply-health-plan.json" \
+  --results "$TMP_STATE/router-post-apply-health-results-pass.json" >"$TMP_STATE/router-post-apply-health-dry-run-pass.json"
+
+python3 -m json.tool "$TMP_STATE/router-post-apply-health-dry-run-fail.json" >/dev/null
+python3 -m json.tool "$TMP_STATE/router-post-apply-health-dry-run-pass.json" >/dev/null
+
+python3 - "$TMP_STATE/router-post-apply-health-dry-run-fail.json" "$TMP_STATE/router-post-apply-health-dry-run-pass.json" <<'PYJSON'
+import json, sys
+fail = json.load(open(sys.argv[1]))
+passed = json.load(open(sys.argv[2]))
+
+assert fail["schema"] == "lilhouse.router_post_apply_health_dry_run.v1"
+assert fail["apply"] is False
+assert fail["live_changes"] is False
+assert fail["ok"] is True
+assert fail["summary"]["all_required_checks_passed"] is False
+assert fail["summary"]["rollback_cancel_allowed"] is False
+assert fail["summary"]["safe_to_cancel_rollback_now"] is False
+
+assert passed["schema"] == "lilhouse.router_post_apply_health_dry_run.v1"
+assert passed["apply"] is False
+assert passed["live_changes"] is False
+assert passed["ok"] is True
+assert passed["summary"]["all_required_checks_passed"] is True
+assert passed["summary"]["rollback_cancel_allowed"] is True
+assert passed["summary"]["safe_to_cancel_rollback_now"] is False
+assert passed["summary"]["safe_to_apply_live"] is False
 PYJSON
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
