@@ -1564,4 +1564,51 @@ assert report["summary"]["safe_to_apply_live"] is False
 assert report["summary"]["next_gate"] == "service-activation"
 PYJSON
 
+
+echo
+echo "== run service activation command in simulated mode =="
+
+SERVICE_ACTIVATION_JSON="$TMP_STATE/service-activation.json"
+
+set +e
+"$REPO_DIR/bin/lilhouse-router-service-activation" \
+  --config-copy-report "$LIVE_CONFIG_COPY_JSON" \
+  --target-root "$LIVE_CONFIG_COPY_ROOT" >"$TMP_STATE/service-activation-refusal.json"
+SERVICE_ACTIVATION_REFUSAL_RC=$?
+set -e
+test "$SERVICE_ACTIVATION_REFUSAL_RC" -eq 2
+
+"$REPO_DIR/bin/lilhouse-router-service-activation" \
+  --config-copy-report "$LIVE_CONFIG_COPY_JSON" \
+  --target-root "$LIVE_CONFIG_COPY_ROOT" \
+  --yes \
+  --simulate \
+  --out "$SERVICE_ACTIVATION_JSON" >"$TMP_STATE/service-activation.out"
+
+python3 - "$SERVICE_ACTIVATION_JSON" <<'PYJSON'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text())
+assert report["schema"] == "lilhouse.router_service_activation.v1"
+assert report["ok"] is True
+assert report["safety"]["apply"] is False
+assert report["safety"]["copies_files"] is False
+assert report["safety"]["writes_config"] is False
+assert report["safety"]["runs_services"] is False
+assert report["safety"]["starts_router_services"] is False
+assert report["safety"]["cancels_rollback"] is False
+assert report["safety"]["rollback_stays_armed"] is True
+assert report["summary"]["services_activated"] is True
+assert report["summary"]["rollback_cancelled"] is False
+assert report["summary"]["rollback_still_required"] is True
+assert report["summary"]["ready_for_post_apply_health"] is True
+assert report["summary"]["ready_for_live_apply"] is False
+assert report["summary"]["safe_to_apply_live"] is False
+assert report["summary"]["next_gate"] == "post-apply-health"
+assert len(report["steps"]) >= 5
+assert all(step["simulated"] is True for step in report["steps"])
+PYJSON
+
 echo "Smoke test passed."
