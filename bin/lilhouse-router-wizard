@@ -238,6 +238,22 @@ LILHOUSE_BLOCK_APPLE_PRIVATE_RELAY=planned
 LILHOUSE_BLOCK_DOH_CANARY=planned
 EOF
 
+PIHOLE_DHCP_PLAN_FILE="$PREVIEW_ROOT/etc/lilhouse/pihole-dhcp-plan.env"
+mkdir -p "$(dirname "$PIHOLE_DHCP_PLAN_FILE")"
+
+cat >"$PIHOLE_DHCP_PLAN_FILE" <<EOF
+# LilHouse router deploy preview
+# This is a safe Pi-hole DHCP plan, not a direct pihole.toml replacement.
+# It has NOT been written to /etc/pihole.
+
+LILHOUSE_DHCP_PROVIDER=pihole-FTL
+LILHOUSE_DHCP_INTERFACE=$LAN
+LILHOUSE_DHCP_ROUTER=$LAN_IP
+LILHOUSE_DHCP_START=$DHCP_START
+LILHOUSE_DHCP_END=$DHCP_END
+LILHOUSE_DHCP_AUTHORITATIVE=true
+EOF
+
 UNBOUND_FILE="$PREVIEW_ROOT/etc/unbound/unbound.conf.d/lilhouse.conf"
 mkdir -p "$(dirname "$UNBOUND_FILE")"
 
