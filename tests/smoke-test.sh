@@ -28,6 +28,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-create"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-verify"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-restore-dry-run"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-restore-create"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -237,7 +238,32 @@ python3 -m json.tool "$TMP_STATE/router-restore-dry-run.json" >/dev/null
 grep -q '"schema": "lilhouse.router_restore_dry_run.v1"' "$TMP_STATE/router-restore-dry-run.json"
 grep -q '"apply": false' "$TMP_STATE/router-restore-dry-run.json"
 grep -q '"copies_files": false' "$TMP_STATE/router-restore-dry-run.json"
-grep -q '"would_restore": 4' "$TMP_STATE/router-restore-dry-run.json"
+python3 - "$TMP_STATE/router-backup-create.json" "$TMP_STATE/router-restore-dry-run.json" <<'PYJSON'
+import json, sys
+backup = json.load(open(sys.argv[1]))
+restore = json.load(open(sys.argv[2]))
+assert restore["summary"]["would_restore"] == backup["summary"]["copied"]
+assert restore["summary"]["would_restore"] >= 4
+PYJSON
+
+RESTORE_CREATE_TARGET="$TMP_STATE/router-restore-create-target"
+mkdir -p "$RESTORE_CREATE_TARGET"
+"$REPO_DIR/bin/lilhouse-router-restore-create" "$BACKUP_OUT" --root "$RESTORE_CREATE_TARGET" --yes >"$TMP_STATE/router-restore-create.json"
+python3 -m json.tool "$TMP_STATE/router-restore-create.json" >/dev/null
+test -f "$RESTORE_CREATE_TARGET/restore-report.json"
+test -f "$RESTORE_CREATE_TARGET/etc/nftables.conf"
+test -f "$RESTORE_CREATE_TARGET/etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+test -f "$RESTORE_CREATE_TARGET/etc/pihole/test.conf"
+grep -q '"schema": "lilhouse.router_restore_create.v1"' "$TMP_STATE/router-restore-create.json"
+grep -q '"ok": true' "$TMP_STATE/router-restore-create.json"
+python3 - "$TMP_STATE/router-backup-create.json" "$TMP_STATE/router-restore-create.json" <<'PYJSON'
+import json, sys
+backup = json.load(open(sys.argv[1]))
+restore = json.load(open(sys.argv[2]))
+assert restore["summary"]["restored"] == backup["summary"]["copied"]
+assert restore["summary"]["restored"] >= 4
+assert restore["ok"] is True
+PYJSON
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
 "$REPO_DIR/bin/lilhouse-router-wizard" \

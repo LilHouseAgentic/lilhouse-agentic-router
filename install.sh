@@ -188,6 +188,7 @@ backup_existing /usr/local/bin/lilhouse-router-backup-dry-run
 backup_existing /usr/local/bin/lilhouse-router-backup-create
 backup_existing /usr/local/bin/lilhouse-router-backup-verify
 backup_existing /usr/local/bin/lilhouse-router-restore-dry-run
+backup_existing /usr/local/bin/lilhouse-router-restore-create
 backup_existing /usr/local/bin/lilhouse-status
 backup_existing /etc/systemd/system/lilhouse-current-state.service
 backup_existing /etc/systemd/system/lilhouse-current-state.timer
@@ -210,6 +211,7 @@ install -m 0755 "$REPO_DIR/bin/lilhouse-router-backup-dry-run" "$(root_path /usr
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-backup-create" "$(root_path /usr/local/bin/lilhouse-router-backup-create)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-backup-verify" "$(root_path /usr/local/bin/lilhouse-router-backup-verify)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-restore-dry-run" "$(root_path /usr/local/bin/lilhouse-router-restore-dry-run)"
+install -m 0755 "$REPO_DIR/bin/lilhouse-router-restore-create" "$(root_path /usr/local/bin/lilhouse-router-restore-create)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-status" "$(root_path /usr/local/bin/lilhouse-status)"
 
 install -m 0644 "$REPO_DIR/systemd/lilhouse-current-state.service" "$(root_path /etc/systemd/system/lilhouse-current-state.service)"
