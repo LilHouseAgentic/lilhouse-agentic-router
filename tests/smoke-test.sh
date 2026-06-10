@@ -110,11 +110,15 @@ test -f "$WIZARD_OUT/interface-report.json"
 test -f "$WIZARD_OUT/router-plan.json"
 test -f "$WIZARD_OUT/router-plan-summary.txt"
 test -f "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
+test -f "$WIZARD_OUT/preview/etc/sysctl.d/90-lilhouse-router-forwarding.conf"
 
 grep -q "LilHouse router deploy preview" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
 grep -q "\[Match\]" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
 grep -q "\[Network\]" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
 grep -q "Address=10.23.0.1/24" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
+
+grep -q "net.ipv4.ip_forward=1" "$WIZARD_OUT/preview/etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+grep -q "net.ipv6.conf.all.forwarding=0" "$WIZARD_OUT/preview/etc/sysctl.d/90-lilhouse-router-forwarding.conf"
 
 grep -q "lan_static_address" "$WIZARD_OUT/router-plan-summary.txt"
 grep -q "forwarding" "$WIZARD_OUT/router-plan-summary.txt"
