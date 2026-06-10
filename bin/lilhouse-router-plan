@@ -161,7 +161,7 @@ plan = {
                 "unbound_listen": "127.0.0.1",
                 "unbound_port": 5335,
                 "pihole_upstream": "127.0.0.1#5335",
-                "block_icould_private_relay": "planned",
+                "block_icloud_private_relay": "planned",
                 "block_doh_canary": "planned",
                 "comment": "DNS blueprint only. No Pi-hole or Unbound settings are written by this command."
             },
