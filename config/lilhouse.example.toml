@@ -1,0 +1,40 @@
+[router]
+name = "LilHouse"
+wan_interface = "eth0"
+lan_interface = "eth1"
+router_ipv4 = "192.168.2.1"
+lan_ipv4_cidr = "192.168.2.0/24"
+
+[paths]
+state_dir = "/var/lib/lilhouse"
+runtime_dir = "/run/lilhouse"
+log_dir = "/var/log/lilhouse"
+config_file = "/etc/lilhouse/lilhouse.toml"
+
+[features]
+enable_ai = false
+enable_notifications = false
+enable_dynamic_cake = false
+enable_starlink_monitor = false
+enable_docker_monitor = true
+enable_status_page = false
+mode = "observe"
+
+[cake]
+download_min_mbit = 100
+download_max_mbit = 300
+upload_min_mbit = 20
+upload_max_mbit = 40
+ping_target = "1.1.1.1"
+qdisc_mode = "diffserv4"
+
+[ai]
+provider = "none"
+model = ""
+require_human_approval = true
+allow_direct_apply = false
+
+[notifications]
+provider = "none"
+only_highest_brain = true
+rate_limit_seconds = 3600
