@@ -23,6 +23,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-plan-summary"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-wizard"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-preview-validate"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -187,6 +188,13 @@ grep -q "worker_timers" "$WIZARD_OUT/router-plan-summary.txt"
 grep -q "No system changes" "$WIZARD_LOG"
 grep -q "Preview validation passed." "$WIZARD_LOG"
 "$REPO_DIR/bin/lilhouse-router-preview-validate" "$WIZARD_OUT/preview" >/dev/null
+
+"$REPO_DIR/bin/lilhouse-router-backup-plan" >"$TMP_STATE/router-backup-plan.json"
+python3 -m json.tool "$TMP_STATE/router-backup-plan.json" >/dev/null
+grep -q '"schema": "lilhouse.router_backup_plan.v1"' "$TMP_STATE/router-backup-plan.json"
+grep -q '"apply": false' "$TMP_STATE/router-backup-plan.json"
+grep -q '"/etc/nftables.conf"' "$TMP_STATE/router-backup-plan.json"
+grep -q '"/etc/pihole"' "$TMP_STATE/router-backup-plan.json"
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
 "$REPO_DIR/bin/lilhouse-router-wizard" \

@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MODE="json"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --json)
+      MODE="json"
+      shift
+      ;;
+    -h|--help)
+      echo "Usage: lilhouse-router-backup-plan [--json]"
+      echo
+      echo "Print the router deploy backup plan. No files are copied."
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [ "$MODE" != "json" ]; then
+  echo "Unsupported mode: $MODE" >&2
+  exit 1
+fi
+
+cat <<'JSON'
+{
+  "schema": "lilhouse.router_backup_plan.v1",
+  "mode": "plan-only",
+  "apply": false,
+  "description": "Files and directories that future router-deploy apply mode must back up before writing anything.",
+  "safety": {
+    "live_changes": false,
+    "copies_files": false,
+    "requires_restore_test_before_apply": true,
+    "timed_firewall_rollback_required": true
+  },
+  "backup_paths": [
+    {
+      "path": "/etc/systemd/network/20-lilhouse-lan.network",
+      "type": "file",
+      "required_if_exists": true,
+      "reason": "LAN static networkd configuration"
+    },
+    {
+      "path": "/etc/sysctl.d/90-lilhouse-router-forwarding.conf",
+      "type": "file",
+      "required_if_exists": true,
+      "reason": "router forwarding sysctl configuration"
+    },
+    {
+      "path": "/etc/nftables.conf",
+      "type": "file",
+      "required_if_exists": true,
+      "reason": "firewall and NAT rules"
+    },
+    {
+      "path": "/etc/lilhouse/cake.env",
+      "type": "file",
+      "required_if_exists": true,
+      "reason": "CAKE/SQM runtime configuration"
+    },
+    {
+      "path": "/etc/pihole",
+      "type": "directory",
+      "required_if_exists": true,
+      "reason": "Pi-hole DNS and DHCP configuration"
+    },
+    {
+      "path": "/etc/unbound/unbound.conf.d/lilhouse.conf",
+      "type": "file",
+      "required_if_exists": true,
+      "reason": "Unbound DNS resolver configuration"
+    },
+    {
+      "path": "/etc/systemd/system/lilhouse-current-state.service",
+      "type": "file",
+      "required_if_exists": true,
+      "reason": "LilHouse current-state service"
+    },
+    {
+      "path": "/etc/systemd/system/lilhouse-current-state.timer",
+      "type": "file",
+      "required_if_exists": true,
+      "reason": "LilHouse current-state timer"
+    },
+    {
+      "path": "/etc/systemd/system/lilhouse-storage-health.service",
+      "type": "file",
+      "required_if_exists": true,
+      "reason": "LilHouse storage-health service"
+    },
+    {
+      "path": "/etc/systemd/system/lilhouse-storage-health.timer",
+      "type": "file",
+      "required_if_exists": true,
+      "reason": "LilHouse storage-health timer"
+    }
+  ],
+  "future_backup_report": {
+    "must_include_timestamp": true,
+    "must_include_source_path": true,
+    "must_include_backup_path": true,
+    "must_include_sha256_when_file_exists": true,
+    "must_include_missing_paths": true
+  }
+}
+JSON
