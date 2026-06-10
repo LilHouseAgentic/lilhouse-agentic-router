@@ -150,4 +150,17 @@ grep -q "dhcp" "$WIZARD_OUT/router-plan-summary.txt"
 grep -q "worker_timers" "$WIZARD_OUT/router-plan-summary.txt"
 grep -q "No system changes" "$WIZARD_LOG"
 
+CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
+"$REPO_DIR/bin/lilhouse-router-wizard" \
+  --out-dir "$CAKE_WIZARD_OUT" \
+  --wan eth0 \
+  --lan eth1 \
+  --enable-cake >/dev/null
+
+test -f "$CAKE_WIZARD_OUT/preview/etc/lilhouse/cake.env"
+grep -q "LILHOUSE_CAKE_ENABLED=true" "$CAKE_WIZARD_OUT/preview/etc/lilhouse/cake.env"
+grep -q "LILHOUSE_CAKE_WAN=eth0" "$CAKE_WIZARD_OUT/preview/etc/lilhouse/cake.env"
+grep -q "LILHOUSE_CAKE_IFB=ifb0" "$CAKE_WIZARD_OUT/preview/etc/lilhouse/cake.env"
+grep -q "LILHOUSE_CAKE_QDISC=cake" "$CAKE_WIZARD_OUT/preview/etc/lilhouse/cake.env"
+
 echo "Smoke test passed."
