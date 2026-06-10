@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+SERVICE_STEPS = [
+    {
+        "name": "daemon_reload",
+        "argv": ["systemctl", "daemon-reload"],
+        "kind": "systemd",
+        "touches_network": False,
+        "touches_firewall": False,
+        "touches_dns": False,
+        "touches_dhcp": False,
+        "touches_cake": False,
+    },
+    {
+        "name": "sysctl_system",
+        "argv": ["sysctl", "--system"],
+        "kind": "sysctl",
+        "touches_network": True,
+        "touches_firewall": False,
+        "touches_dns": False,
+        "touches_dhcp": False,
+        "touches_cake": False,
+    },
+    {
+        "name": "enable_nftables",
+        "argv": ["systemctl", "enable", "--now", "nftables"],
+        "kind": "systemd",
+        "touches_network": False,
+        "touches_firewall": True,
+        "touches_dns": False,
+        "touches_dhcp": False,
+        "touches_cake": False,
+    },
+    {
+        "name": "restart_unbound",
+        "argv": ["systemctl", "restart", "unbound"],
+        "kind": "systemd",
+        "touches_network": False,
+        "touches_firewall": False,
+        "touches_dns": True,
+        "touches_dhcp": False,
+        "touches_cake": False,
+    },
+    {
+        "name": "restart_pihole_ftl",
+        "argv": ["systemctl", "restart", "pihole-FTL"],
+        "kind": "systemd",
+        "touches_network": False,
+        "touches_firewall": False,
+        "touches_dns": True,
+        "touches_dhcp": True,
+        "touches_cake": False,
+    },
+    {
+        "name": "enable_current_state_timer",
+        "argv": ["systemctl", "enable", "--now", "lilhouse-current-state.timer"],
+        "kind": "systemd",
+        "touches_network": False,
+        "touches_firewall": False,
+        "touches_dns": False,
+        "touches_dhcp": False,
+        "touches_cake": False,
+    },
+    {
+        "name": "enable_storage_health_timer",
+        "argv": ["systemctl", "enable", "--now", "lilhouse-storage-health.timer"],
+        "kind": "systemd",
+        "touches_network": False,
+        "touches_firewall": False,
+        "touches_dns": False,
+        "touches_dhcp": False,
+        "touches_cake": False,
+    },
+]
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def load_json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception as e:
+        raise SystemExit(f"failed to read JSON {path}: {e}")
+
+
+def run_cmd(argv):
+    exe = shutil.which(argv[0])
+    if not exe:
+        return {
+            "argv": argv,
+            "available": False,
+            "returncode": None,
+            "stdout": "",
+            "stderr": f"{argv[0]} not found",
+            "ok": False,
+        }
+
+    p = subprocess.run(
+        [exe, *argv[1:]],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    return {
+        "argv": argv,
+        "available": True,
+        "returncode": p.returncode,
+        "stdout": p.stdout.strip(),
+        "stderr": p.stderr.strip(),
+        "ok": p.returncode == 0,
+    }
+
+
+def simulated_result(step):
+    return {
+        "name": step["name"],
+        "argv": step["argv"],
+        "kind": step["kind"],
+        "available": shutil.which(step["argv"][0]) is not None,
+        "returncode": 0,
+        "stdout": "",
+        "stderr": "",
+        "ok": True,
+        "simulated": True,
+        "touches_network": step["touches_network"],
+        "touches_firewall": step["touches_firewall"],
+        "touches_dns": step["touches_dns"],
+        "touches_dhcp": step["touches_dhcp"],
+        "touches_cake": step["touches_cake"],
+    }
+
+
+def live_result(step):
+    result = run_cmd(step["argv"])
+    result.update({
+        "name": step["name"],
+        "kind": step["kind"],
+        "simulated": False,
+        "touches_network": step["touches_network"],
+        "touches_firewall": step["touches_firewall"],
+        "touches_dns": step["touches_dns"],
+        "touches_dhcp": step["touches_dhcp"],
+        "touches_cake": step["touches_cake"],
+    })
+    return result
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Activate router services after guarded config copy.")
+    ap.add_argument("--config-copy-report", required=True)
+    ap.add_argument("--target-root", default="/")
+    ap.add_argument("--yes", action="store_true", help="Required to activate services.")
+    ap.add_argument("--allow-live-root", action="store_true", help="Required when --target-root /.")
+    ap.add_argument("--simulate", action="store_true", help="Do not call systemctl/sysctl; simulate activation.")
+    ap.add_argument("--out", default="")
+    args = ap.parse_args()
+
+    target_root = Path(args.target_root).resolve()
+
+    if not args.yes:
+        print("ERROR: refusing to activate services without --yes", file=sys.stderr)
+        return 2
+
+    if target_root == Path("/") and not args.allow_live_root:
+        print("ERROR: refusing to activate services on live / without --allow-live-root", file=sys.stderr)
+        return 2
+
+    copy_report = load_json(args.config_copy_report)
+
+    if copy_report.get("schema") != "lilhouse.router_live_config_copy.v1":
+        print("ERROR: config copy report schema mismatch", file=sys.stderr)
+        return 2
+
+    if copy_report.get("ok") is not True:
+        print("ERROR: config copy report is not OK", file=sys.stderr)
+        return 2
+
+    if copy_report.get("summary", {}).get("ready_for_service_activation") is not True:
+        print("ERROR: config copy did not approve service activation", file=sys.stderr)
+        return 2
+
+    live_mode = target_root == Path("/") and not args.simulate
+
+    if live_mode:
+        results = [live_result(step) for step in SERVICE_STEPS]
+    else:
+        results = [simulated_result(step) for step in SERVICE_STEPS]
+
+    ok = all(item["ok"] for item in results)
+
+    report = {
+        "schema": "lilhouse.router_service_activation.v1",
+        "ok": ok,
+        "generated_at": now_iso(),
+        "mode": "service-activation-live" if live_mode else "service-activation-simulated",
+        "inputs": {
+            "config_copy_report": str(Path(args.config_copy_report)),
+            "target_root": str(target_root),
+            "allow_live_root": args.allow_live_root,
+            "yes": args.yes,
+            "simulate": args.simulate,
+        },
+        "safety": {
+            "apply": False,
+            "live_changes": live_mode,
+            "copies_files": False,
+            "writes_config": False,
+            "runs_services": live_mode,
+            "starts_router_services": live_mode,
+            "restarts_network": any(r["touches_network"] for r in results) and live_mode,
+            "touches_network_runtime": any(r["touches_network"] for r in results) and live_mode,
+            "touches_firewall_runtime": any(r["touches_firewall"] for r in results) and live_mode,
+            "touches_dns_runtime": any(r["touches_dns"] for r in results) and live_mode,
+            "touches_dhcp_runtime": any(r["touches_dhcp"] for r in results) and live_mode,
+            "touches_cake_runtime": any(r["touches_cake"] for r in results) and live_mode,
+            "cancels_rollback": False,
+            "rollback_stays_armed": True,
+        },
+        "summary": {
+            "step_count": len(results),
+            "successful_steps": len([r for r in results if r["ok"]]),
+            "failed_steps": len([r for r in results if not r["ok"]]),
+            "services_activated": ok,
+            "rollback_cancelled": False,
+            "rollback_still_required": True,
+            "ready_for_post_apply_health": ok,
+            "ready_for_live_apply": False,
+            "safe_to_apply_live": False,
+            "next_gate": "post-apply-health",
+        },
+        "steps": results,
+    }
+
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if ok else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
