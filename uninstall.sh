@@ -26,6 +26,7 @@ rm -f /usr/local/bin/lilhouse-storage-health
 rm -f /usr/local/bin/lilhouse-interface-report
 rm -f /usr/local/bin/lilhouse-router-plan
 rm -f /usr/local/bin/lilhouse-router-plan-summary
+rm -f /usr/local/bin/lilhouse-router-wizard
 rm -f /usr/local/bin/lilhouse-status
 rm -f /usr/lib/lilhouse/lilhouse-common.sh
 

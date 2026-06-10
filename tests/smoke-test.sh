@@ -21,6 +21,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-storage-health"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-interface-report"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-plan-summary"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-wizard"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -69,6 +70,15 @@ LILHOUSE_STORAGE_PATHS="/,$REPO_DIR" \
 
 "$REPO_DIR/bin/lilhouse-router-plan-summary" "$TMP_STATE/router-plan.json" >"$TMP_STATE/router-plan-summary.txt"
 
+"$REPO_DIR/bin/lilhouse-router-wizard" \
+  --out-dir "$TMP_STATE/router-wizard" \
+  --wan wan0 \
+  --lan lan0 \
+  --lan-ip 10.23.0.1 \
+  --subnet 10.23.0.0/24 \
+  --dhcp-start 10.23.0.100 \
+  --dhcp-end 10.23.0.200 >/dev/null
+
 LILHOUSE_STATE_DIR="$TMP_STATE" \
 LILHOUSE_RUNTIME_DIR="$TMP_RUN" \
 LILHOUSE_LOG_DIR="$TMP_LOG" \
@@ -84,6 +94,9 @@ test -s "$TMP_STATE/storage-health.json"
 test -s "$TMP_STATE/interface-report.json"
 test -s "$TMP_STATE/router-plan.json"
 test -s "$TMP_STATE/router-plan-summary.txt"
+test -s "$TMP_STATE/router-wizard/interface-report.json"
+test -s "$TMP_STATE/router-wizard/router-plan.json"
+test -s "$TMP_STATE/router-wizard/router-plan-summary.txt"
 
 echo
 echo "Smoke test passed."

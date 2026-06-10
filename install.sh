@@ -156,6 +156,7 @@ backup_existing /usr/local/bin/lilhouse-storage-health
 backup_existing /usr/local/bin/lilhouse-interface-report
 backup_existing /usr/local/bin/lilhouse-router-plan
 backup_existing /usr/local/bin/lilhouse-router-plan-summary
+backup_existing /usr/local/bin/lilhouse-router-wizard
 backup_existing /usr/local/bin/lilhouse-status
 backup_existing /etc/systemd/system/lilhouse-current-state.service
 backup_existing /etc/systemd/system/lilhouse-current-state.timer
@@ -171,6 +172,7 @@ install -m 0755 "$REPO_DIR/bin/lilhouse-storage-health" "$(root_path /usr/local/
 install -m 0755 "$REPO_DIR/bin/lilhouse-interface-report" "$(root_path /usr/local/bin/lilhouse-interface-report)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-plan" "$(root_path /usr/local/bin/lilhouse-router-plan)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-plan-summary" "$(root_path /usr/local/bin/lilhouse-router-plan-summary)"
+install -m 0755 "$REPO_DIR/bin/lilhouse-router-wizard" "$(root_path /usr/local/bin/lilhouse-router-wizard)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-status" "$(root_path /usr/local/bin/lilhouse-status)"
 
 install -m 0644 "$REPO_DIR/systemd/lilhouse-current-state.service" "$(root_path /etc/systemd/system/lilhouse-current-state.service)"
