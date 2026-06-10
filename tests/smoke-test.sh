@@ -47,6 +47,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-confirmation-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-confirmation-check"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-post-apply-health-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-post-apply-health-dry-run"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-post-apply-health-rehearsal"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -700,6 +701,33 @@ assert passed["summary"]["all_required_checks_passed"] is True
 assert passed["summary"]["rollback_cancel_allowed"] is True
 assert passed["summary"]["safe_to_cancel_rollback_now"] is False
 assert passed["summary"]["safe_to_apply_live"] is False
+PYJSON
+
+HEALTH_REHEARSAL_OUT="$TMP_STATE/router-post-apply-health-rehearsal"
+"$REPO_DIR/bin/lilhouse-router-post-apply-health-rehearsal" \
+  --out-dir "$HEALTH_REHEARSAL_OUT" \
+  --apply-plan "$DRESS_OUT/apply-plan.json" \
+  --lan-ip 10.23.0.1 \
+  --dns-test-name example.com \
+  --wan-test-ip 1.1.1.1 \
+  --timeout-seconds 120 >"$TMP_STATE/router-post-apply-health-rehearsal.json"
+
+python3 -m json.tool "$TMP_STATE/router-post-apply-health-rehearsal.json" >/dev/null
+test -f "$HEALTH_REHEARSAL_OUT/post-apply-health-rehearsal-report.json"
+test -f "$HEALTH_REHEARSAL_OUT/post-apply-health-plan.json"
+
+python3 - "$TMP_STATE/router-post-apply-health-rehearsal.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_post_apply_health_rehearsal.v1"
+assert data["apply"] is False
+assert data["live_changes"] is False
+assert data["ok"] is True
+assert data["summary"]["health_plan_ok"] is True
+assert data["summary"]["failure_blocks_rollback_cancel"] is True
+assert data["summary"]["all_pass_allows_rollback_cancel_in_theory"] is True
+assert data["summary"]["safe_to_cancel_rollback_now"] is False
+assert data["summary"]["safe_to_apply_live"] is False
 PYJSON
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"

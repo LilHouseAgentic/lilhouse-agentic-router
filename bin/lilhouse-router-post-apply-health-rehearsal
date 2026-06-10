@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+FAIL_RESULTS = {
+    "local_admin_path": True,
+    "lan_gateway_reachable": True,
+    "dns_resolution": False,
+    "wan_reachability": True,
+    "dhcp_service_state": True,
+    "firewall_service_state": True,
+    "rollback_timer_state": True,
+}
+
+PASS_RESULTS = {
+    "local_admin_path": True,
+    "lan_gateway_reachable": True,
+    "dns_resolution": True,
+    "wan_reachability": True,
+    "dhcp_service_state": True,
+    "firewall_service_state": True,
+    "rollback_timer_state": True,
+}
+
+
+def run_json(cmd):
+    out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
+    return json.loads(out)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Run non-live post-apply health rehearsal with simulated fail/pass results."
+    )
+    parser.add_argument("--out-dir", required=True)
+    parser.add_argument("--apply-plan", required=True)
+    parser.add_argument("--lan-ip", default="10.23.0.1")
+    parser.add_argument("--dns-test-name", default="example.com")
+    parser.add_argument("--wan-test-ip", default="1.1.1.1")
+    parser.add_argument("--timeout-seconds", type=int, default=120)
+    args = parser.parse_args()
+
+    script_dir = Path(__file__).resolve().parent
+    out_dir = Path(args.out_dir).resolve()
+    apply_plan = Path(args.apply_plan).resolve()
+
+    if not apply_plan.is_file():
+        print(f"ERROR: apply plan not found: {apply_plan}", file=sys.stderr)
+        return 1
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    health_plan_path = out_dir / "post-apply-health-plan.json"
+    fail_results_path = out_dir / "post-apply-health-results-fail.json"
+    pass_results_path = out_dir / "post-apply-health-results-pass.json"
+
+    fail_results_path.write_text(json.dumps(FAIL_RESULTS, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    pass_results_path.write_text(json.dumps(PASS_RESULTS, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    health_plan = run_json([
+        str(script_dir / "lilhouse-router-post-apply-health-plan"),
+        str(apply_plan),
+        "--lan-ip", args.lan_ip,
+        "--dns-test-name", args.dns_test_name,
+        "--wan-test-ip", args.wan_test_ip,
+        "--timeout-seconds", str(args.timeout_seconds),
+    ])
+    health_plan_path.write_text(json.dumps(health_plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    fail_dry_run = run_json([
+        str(script_dir / "lilhouse-router-post-apply-health-dry-run"),
+        str(health_plan_path),
+        "--results", str(fail_results_path),
+    ])
+
+    pass_dry_run = run_json([
+        str(script_dir / "lilhouse-router-post-apply-health-dry-run"),
+        str(health_plan_path),
+        "--results", str(pass_results_path),
+    ])
+
+    ok = (
+        health_plan.get("ok") is True
+        and fail_dry_run.get("ok") is True
+        and pass_dry_run.get("ok") is True
+        and fail_dry_run.get("summary", {}).get("rollback_cancel_allowed") is False
+        and pass_dry_run.get("summary", {}).get("rollback_cancel_allowed") is True
+        and pass_dry_run.get("summary", {}).get("safe_to_cancel_rollback_now") is False
+    )
+
+    result = {
+        "schema": "lilhouse.router_post_apply_health_rehearsal.v1",
+        "mode": "post-apply-health-rehearsal",
+        "apply": False,
+        "live_changes": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "out_dir": str(out_dir),
+        "apply_plan": str(apply_plan),
+        "ok": ok,
+        "summary": {
+            "health_plan_ok": health_plan.get("ok") is True,
+            "failure_blocks_rollback_cancel": fail_dry_run.get("summary", {}).get("rollback_cancel_allowed") is False,
+            "all_pass_allows_rollback_cancel_in_theory": pass_dry_run.get("summary", {}).get("rollback_cancel_allowed") is True,
+            "safe_to_cancel_rollback_now": False,
+            "safe_to_apply_live": False,
+        },
+        "reports": {
+            "health_plan": health_plan,
+            "fail_dry_run": fail_dry_run,
+            "pass_dry_run": pass_dry_run,
+        },
+    }
+
+    report_path = out_dir / "post-apply-health-rehearsal-report.json"
+    report_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
