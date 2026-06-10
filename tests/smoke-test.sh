@@ -215,4 +215,19 @@ grep -q "LILHOUSE_IPV6_NAT66=false" "$IPV6_WIZARD_OUT/preview/etc/lilhouse/ipv6-
 grep -q "LILHOUSE_IPV6_INBOUND_SSH=explicit_opt_in_only" "$IPV6_WIZARD_OUT/preview/etc/lilhouse/ipv6-plan.env"
 "$REPO_DIR/bin/lilhouse-router-preview-validate" "$IPV6_WIZARD_OUT/preview" >/dev/null
 
+FULL_WIZARD_OUT="$TMP_STATE/install-router-wizard-full"
+"$REPO_DIR/bin/lilhouse-router-wizard" \
+  --out-dir "$FULL_WIZARD_OUT" \
+  --wan eth0 \
+  --lan eth1 \
+  --enable-cake \
+  --enable-ipv6 >"$TMP_STATE/install-router-wizard-full.out"
+
+grep -q "Preview validation passed." "$TMP_STATE/install-router-wizard-full.out"
+test -f "$FULL_WIZARD_OUT/preview/etc/lilhouse/cake.env"
+test -f "$FULL_WIZARD_OUT/preview/etc/lilhouse/ipv6-plan.env"
+grep -q "Enable CAKE: 1" "$FULL_WIZARD_OUT/preview/MANIFEST.txt"
+grep -q "Enable IPv6: 1" "$FULL_WIZARD_OUT/preview/MANIFEST.txt"
+"$REPO_DIR/bin/lilhouse-router-preview-validate" "$FULL_WIZARD_OUT/preview" >/dev/null
+
 echo "Smoke test passed."
