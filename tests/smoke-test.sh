@@ -55,6 +55,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-readiness-review"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-health-probe-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-health-probe-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-health-probe-rehearsal"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-apply-executor-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -1050,6 +1051,52 @@ assert blockers["real_health_probe_executor"]["status"] == "probe_rehearsal_prov
 assert blockers["real_health_probe_executor"]["severity"] == "high"
 assert blockers["real_service_activation_executor"]["status"] == "service_rehearsal_proven"
 assert blockers["real_service_activation_executor"]["severity"] == "high"
+PYJSON
+
+
+"$REPO_DIR/bin/lilhouse-router-live-apply-executor-plan" \
+  "$TMP_STATE/router-live-readiness-review-with-health-probe.json" \
+  --confirmation-check-report "$TMP_STATE/router-live-confirmation-check-good.json" >"$TMP_STATE/router-live-apply-executor-plan-no-allow.json"
+
+"$REPO_DIR/bin/lilhouse-router-live-apply-executor-plan" \
+  "$TMP_STATE/router-live-readiness-review-with-health-probe.json" \
+  --confirmation-check-report "$TMP_STATE/router-live-confirmation-check-good.json" \
+  --allow-live-root >"$TMP_STATE/router-live-apply-executor-plan-allow.json"
+
+python3 -m json.tool "$TMP_STATE/router-live-apply-executor-plan-no-allow.json" >/dev/null
+python3 -m json.tool "$TMP_STATE/router-live-apply-executor-plan-allow.json" >/dev/null
+
+python3 - "$TMP_STATE/router-live-apply-executor-plan-no-allow.json" "$TMP_STATE/router-live-apply-executor-plan-allow.json" <<'PYJSON'
+import json, sys
+no_allow = json.load(open(sys.argv[1]))
+allow = json.load(open(sys.argv[2]))
+
+assert no_allow["schema"] == "lilhouse.router_live_apply_executor_plan.v1"
+assert no_allow["apply"] is False
+assert no_allow["live_changes"] is False
+assert no_allow["copies_files"] is False
+assert no_allow["runs_services"] is False
+assert no_allow["ok"] is True
+assert no_allow["summary"]["allow_live_root_supplied"] is False
+assert no_allow["summary"]["gates_passed"] == no_allow["summary"]["gate_count"] - 1
+assert no_allow["summary"]["safe_to_apply_live"] is False
+
+no_allow_gates = {item["id"]: item for item in no_allow["gates"]}
+assert no_allow_gates["live_root_explicitly_allowed"]["ok"] is False
+
+assert allow["schema"] == "lilhouse.router_live_apply_executor_plan.v1"
+assert allow["apply"] is False
+assert allow["live_changes"] is False
+assert allow["copies_files"] is False
+assert allow["runs_services"] is False
+assert allow["ok"] is True
+assert allow["summary"]["allow_live_root_supplied"] is True
+assert allow["summary"]["gates_passed"] == allow["summary"]["gate_count"]
+assert allow["summary"]["executor_policy_defined"] is True
+assert allow["summary"]["safe_to_apply_live"] is False
+
+allow_gates = {item["id"]: item for item in allow["gates"]}
+assert allow_gates["live_root_explicitly_allowed"]["ok"] is True
 PYJSON
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"

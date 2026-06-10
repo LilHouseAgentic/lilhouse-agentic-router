@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+CONFIRMATION_PHRASE = "I have local console access and accept temporary network interruption"
+
+
+def load_json(path: Path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Plan future live apply executor requirements. Writes nothing and applies nothing."
+    )
+    parser.add_argument("readiness_review")
+    parser.add_argument("--confirmation-check-report", required=True)
+    parser.add_argument("--allow-live-root", action="store_true")
+    args = parser.parse_args()
+
+    readiness_path = Path(args.readiness_review).resolve()
+    confirmation_path = Path(args.confirmation_check_report).resolve()
+
+    for label, path in {
+        "readiness_review": readiness_path,
+        "confirmation_check_report": confirmation_path,
+    }.items():
+        if not path.is_file():
+            print(f"ERROR: {label} not found: {path}", file=sys.stderr)
+            return 1
+
+    readiness = load_json(readiness_path)
+    confirmation = load_json(confirmation_path)
+
+    errors = []
+
+    if readiness.get("schema") != "lilhouse.router_live_readiness_review.v1":
+        errors.append("input is not a live readiness review")
+    if readiness.get("ok") is not True:
+        errors.append("readiness review is not OK")
+    if readiness.get("apply") is not False:
+        errors.append("readiness review must be non-applying")
+    if readiness.get("live_changes") is not False:
+        errors.append("readiness review must declare live_changes false")
+    if readiness.get("ready_for_live_apply") is not False:
+        errors.append("readiness review must still be blocking live apply")
+
+    summary = readiness.get("summary", {})
+    if summary.get("non_live_pipeline_proven") is not True:
+        errors.append("non-live pipeline must be proven")
+    if summary.get("only_remaining_critical") != ["live_apply_root_copy_executor"]:
+        errors.append("only remaining critical blocker must be live_apply_root_copy_executor")
+    if summary.get("safe_to_apply_live") is not False:
+        errors.append("readiness review must not declare live apply safe")
+
+    if confirmation.get("schema") != "lilhouse.router_live_confirmation_check.v1":
+        errors.append("confirmation check schema must match")
+    if confirmation.get("accepted") is not True:
+        errors.append("confirmation phrase must be accepted")
+
+    gates = [
+        {
+            "order": 10,
+            "id": "readiness_review_ok",
+            "ok": readiness.get("ok") is True,
+            "required": True,
+        },
+        {
+            "order": 20,
+            "id": "non_live_pipeline_proven",
+            "ok": summary.get("non_live_pipeline_proven") is True,
+            "required": True,
+        },
+        {
+            "order": 30,
+            "id": "rollback_guard_proven",
+            "ok": summary.get("rollback_rehearsal_proven") is True,
+            "required": True,
+        },
+        {
+            "order": 40,
+            "id": "health_probe_rehearsal_proven",
+            "ok": summary.get("health_probe_rehearsal_proven") is True,
+            "required": True,
+        },
+        {
+            "order": 50,
+            "id": "service_rehearsal_proven",
+            "ok": summary.get("service_rehearsal_proven") is True,
+            "required": True,
+        },
+        {
+            "order": 60,
+            "id": "exact_confirmation_accepted",
+            "ok": confirmation.get("accepted") is True,
+            "required": True,
+        },
+        {
+            "order": 70,
+            "id": "live_root_explicitly_allowed",
+            "ok": args.allow_live_root is True,
+            "required": True,
+        },
+    ]
+
+    result = {
+        "schema": "lilhouse.router_live_apply_executor_plan.v1",
+        "mode": "live-apply-executor-plan",
+        "apply": False,
+        "live_changes": False,
+        "copies_files": False,
+        "runs_services": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "ok": not errors,
+        "error_count": len(errors),
+        "errors": errors,
+        "readiness_review": str(readiness_path),
+        "confirmation_check_report": str(confirmation_path),
+        "required_confirmation_phrase": CONFIRMATION_PHRASE,
+        "gates": gates,
+        "future_executor_policy": {
+            "must_arm_rollback_before_changes": True,
+            "must_verify_backup_before_changes": True,
+            "must_run_health_probe_after_changes": True,
+            "must_cancel_rollback_only_after_health_pass": True,
+            "must_refuse_without_allow_live_root": True,
+            "must_refuse_without_exact_confirmation": True,
+            "must_never_run_from_ssh_only_without_local_console_ack": True,
+        },
+        "summary": {
+            "gate_count": len(gates),
+            "gates_passed": sum(1 for g in gates if g["ok"]),
+            "allow_live_root_supplied": args.allow_live_root is True,
+            "executor_policy_defined": True,
+            "safe_to_apply_live": False,
+        },
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
