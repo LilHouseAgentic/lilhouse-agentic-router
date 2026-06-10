@@ -1505,4 +1505,63 @@ assert report["summary"]["safe_to_apply_live"] is False
 assert report["summary"]["next_gate"] == "live-config-copy"
 PYJSON
 
+
+echo
+echo "== run live config copy command against fake root =="
+
+LIVE_CONFIG_COPY_ROOT="$TMP_STATE/live-config-copy-root"
+LIVE_CONFIG_COPY_JSON="$TMP_STATE/live-config-copy.json"
+
+set +e
+"$REPO_DIR/bin/lilhouse-router-live-config-copy" \
+  --rollback-start-report "$ROLLBACK_START_JSON" \
+  --preview-dir "$FULL_WIZARD_OUT/preview" \
+  --target-root "$LIVE_CONFIG_COPY_ROOT" >"$TMP_STATE/live-config-copy-refusal.json"
+LIVE_CONFIG_COPY_REFUSAL_RC=$?
+set -e
+test "$LIVE_CONFIG_COPY_REFUSAL_RC" -eq 2
+
+"$REPO_DIR/bin/lilhouse-router-live-config-copy" \
+  --rollback-start-report "$ROLLBACK_START_JSON" \
+  --preview-dir "$FULL_WIZARD_OUT/preview" \
+  --target-root "$LIVE_CONFIG_COPY_ROOT" \
+  --yes \
+  --out "$LIVE_CONFIG_COPY_JSON" >"$TMP_STATE/live-config-copy.out"
+
+test -f "$LIVE_CONFIG_COPY_ROOT/etc/nftables.conf"
+test -f "$LIVE_CONFIG_COPY_ROOT/etc/systemd/network/20-lilhouse-lan.network"
+test -f "$LIVE_CONFIG_COPY_ROOT/etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+test -f "$LIVE_CONFIG_COPY_ROOT/etc/lilhouse/pihole-dns-plan.env"
+test -f "$LIVE_CONFIG_COPY_ROOT/etc/lilhouse/pihole-dhcp-plan.env"
+test -f "$LIVE_CONFIG_COPY_ROOT/etc/unbound/unbound.conf.d/lilhouse.conf"
+test -f "$LIVE_CONFIG_COPY_ROOT/etc/lilhouse/cake.env"
+test -f "$LIVE_CONFIG_COPY_ROOT/etc/lilhouse/ipv6-plan.env"
+
+python3 - "$LIVE_CONFIG_COPY_JSON" <<'PYJSON'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text())
+assert report["schema"] == "lilhouse.router_live_config_copy.v1"
+assert report["ok"] is True
+assert report["safety"]["apply"] is False
+assert report["safety"]["copies_files"] is True
+assert report["safety"]["copies_preview_etc_only"] is True
+assert report["safety"]["runs_services"] is False
+assert report["safety"]["starts_router_services"] is False
+assert report["safety"]["restarts_network"] is False
+assert report["safety"]["touches_network_runtime"] is False
+assert report["safety"]["touches_firewall_runtime"] is False
+assert report["safety"]["touches_dns_runtime"] is False
+assert report["safety"]["touches_dhcp_runtime"] is False
+assert report["safety"]["touches_cake_runtime"] is False
+assert report["safety"]["writes_config"] is True
+assert report["safety"]["rollback_timer_required_before_copy"] is True
+assert report["summary"]["ready_for_service_activation"] is True
+assert report["summary"]["ready_for_live_apply"] is False
+assert report["summary"]["safe_to_apply_live"] is False
+assert report["summary"]["next_gate"] == "service-activation"
+PYJSON
+
 echo "Smoke test passed."

@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+import argparse
+import hashlib
+import json
+import shutil
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def load_json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception as e:
+        raise SystemExit(f"failed to read JSON {path}: {e}")
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with Path(path).open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def copy_preview_etc(preview_dir, target_root):
+    src_etc = preview_dir / "etc"
+    if not src_etc.exists() or not src_etc.is_dir():
+        raise SystemExit(f"preview does not contain etc directory: {src_etc}")
+
+    copied = []
+
+    for src in sorted(src_etc.rglob("*")):
+        rel = src.relative_to(preview_dir)
+        dst = target_root / rel
+
+        item = {
+            "source": str(src),
+            "relative_path": str(rel),
+            "target": str(dst),
+            "type": None,
+            "copied": False,
+            "sha256": None,
+        }
+
+        if src.is_dir():
+            dst.mkdir(parents=True, exist_ok=True)
+            item["type"] = "directory"
+            item["copied"] = True
+        elif src.is_file():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            item["type"] = "file"
+            item["sha256"] = sha256_file(dst)
+            item["copied"] = True
+        elif src.is_symlink():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if dst.exists() or dst.is_symlink():
+                dst.unlink()
+            dst.symlink_to(src.readlink())
+            item["type"] = "symlink"
+            item["copied"] = True
+        else:
+            item["type"] = "other"
+            item["copied"] = False
+
+        copied.append(item)
+
+    return copied
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Copy staged router preview config into a target root.")
+    ap.add_argument("--rollback-start-report", required=True)
+    ap.add_argument("--preview-dir", required=True)
+    ap.add_argument("--target-root", default="/")
+    ap.add_argument("--yes", action="store_true", help="Required to copy staged config.")
+    ap.add_argument("--allow-live-root", action="store_true", help="Required when --target-root /.")
+    ap.add_argument("--out", default="")
+    args = ap.parse_args()
+
+    target_root = Path(args.target_root).resolve()
+    preview_dir = Path(args.preview_dir).resolve()
+
+    if not args.yes:
+        print("ERROR: refusing to copy live config without --yes", file=sys.stderr)
+        return 2
+
+    if target_root == Path("/") and not args.allow_live_root:
+        print("ERROR: refusing to copy config into live / without --allow-live-root", file=sys.stderr)
+        return 2
+
+    if not preview_dir.exists() or not preview_dir.is_dir():
+        print(f"ERROR: preview dir not found: {preview_dir}", file=sys.stderr)
+        return 2
+
+    rollback_start = load_json(args.rollback_start_report)
+
+    if rollback_start.get("schema") != "lilhouse.router_rollback_start.v1":
+        print("ERROR: rollback start report schema mismatch", file=sys.stderr)
+        return 2
+
+    if rollback_start.get("ok") is not True:
+        print("ERROR: rollback start report is not OK", file=sys.stderr)
+        return 2
+
+    if rollback_start.get("summary", {}).get("ready_for_live_config_copy") is not True:
+        print("ERROR: rollback start did not approve live config copy", file=sys.stderr)
+        return 2
+
+    copied = copy_preview_etc(preview_dir, target_root)
+    copied_files = [i for i in copied if i["type"] in ("file", "symlink") and i["copied"]]
+    copied_dirs = [i for i in copied if i["type"] == "directory" and i["copied"]]
+    failed = [i for i in copied if not i["copied"]]
+
+    report = {
+        "schema": "lilhouse.router_live_config_copy.v1",
+        "ok": len(failed) == 0 and len(copied_files) > 0,
+        "generated_at": now_iso(),
+        "mode": "live-config-copy" if target_root == Path("/") else "live-config-copy-fake-root",
+        "inputs": {
+            "rollback_start_report": str(Path(args.rollback_start_report)),
+            "preview_dir": str(preview_dir),
+            "target_root": str(target_root),
+            "allow_live_root": args.allow_live_root,
+            "yes": args.yes,
+        },
+        "safety": {
+            "apply": False,
+            "live_changes": target_root == Path("/"),
+            "copies_files": True,
+            "copies_preview_etc_only": True,
+            "runs_services": False,
+            "starts_router_services": False,
+            "restarts_network": False,
+            "touches_network_runtime": False,
+            "touches_firewall_runtime": False,
+            "touches_dns_runtime": False,
+            "touches_dhcp_runtime": False,
+            "touches_cake_runtime": False,
+            "writes_config": True,
+            "rollback_timer_required_before_copy": True,
+        },
+        "summary": {
+            "copied_file_count": len(copied_files),
+            "copied_dir_count": len(copied_dirs),
+            "failed_count": len(failed),
+            "ready_for_service_activation": len(failed) == 0 and len(copied_files) > 0,
+            "ready_for_live_apply": False,
+            "safe_to_apply_live": False,
+            "next_gate": "service-activation",
+        },
+        "items": copied,
+    }
+
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["ok"] else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
