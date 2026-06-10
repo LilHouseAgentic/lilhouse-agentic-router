@@ -245,6 +245,22 @@ if args.enable_ipv6:
         "intent": "Plan IPv6 forwarding where the upstream provides IPv6.",
         "risk": "medium",
         "apply_status": "not_implemented",
+        "planned_files": [
+            "/etc/sysctl.d/90-lilhouse-router-forwarding.conf",
+            "/etc/systemd/network/20-lilhouse-lan.network",
+            "/etc/nftables.conf"
+        ],
+        "planned_settings": {
+            "wan_interface": args.wan,
+            "lan_interface": args.lan,
+            "ipv6_forwarding": True,
+            "lan_router_advertisements": "planned",
+            "prefix_source": "upstream_delegated_prefix_or_existing_global_lan_prefix",
+            "nat66": False,
+            "firewall_policy": "allow_lan_to_wan_drop_unsolicited_wan",
+            "inbound_ipv6_ssh": "planned_as_explicit_opt_in_only",
+            "comment": "IPv6 blueprint only. No forwarding, RA, firewall, or SSH exposure changes are made by this command."
+        },
     })
 
 text = json.dumps(plan, indent=2, sort_keys=True) + "\n"
