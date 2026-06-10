@@ -109,6 +109,12 @@ WIZARD_LOG="$TMP_STATE/install-router-wizard.out"
 test -f "$WIZARD_OUT/interface-report.json"
 test -f "$WIZARD_OUT/router-plan.json"
 test -f "$WIZARD_OUT/router-plan-summary.txt"
+test -f "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
+
+grep -q "LilHouse router deploy preview" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
+grep -q "\[Match\]" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
+grep -q "\[Network\]" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
+grep -q "Address=10.23.0.1/24" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
 
 grep -q "lan_static_address" "$WIZARD_OUT/router-plan-summary.txt"
 grep -q "forwarding" "$WIZARD_OUT/router-plan-summary.txt"
