@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def load_json(path: Path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Generate final non-live deploy runbook from live apply executor plan. Writes nothing unless --out is supplied."
+    )
+    parser.add_argument("live_apply_executor_plan")
+    parser.add_argument("--out", help="Optional output path for runbook JSON.")
+    args = parser.parse_args()
+
+    plan_path = Path(args.live_apply_executor_plan).resolve()
+    if not plan_path.is_file():
+        print(f"ERROR: live apply executor plan not found: {plan_path}", file=sys.stderr)
+        return 1
+
+    plan = load_json(plan_path)
+    errors = []
+
+    if plan.get("schema") != "lilhouse.router_live_apply_executor_plan.v1":
+        errors.append("input is not a live apply executor plan")
+    if plan.get("ok") is not True:
+        errors.append("live apply executor plan is not OK")
+    if plan.get("apply") is not False:
+        errors.append("live apply executor plan must be non-applying")
+    if plan.get("live_changes") is not False:
+        errors.append("live apply executor plan must declare live_changes false")
+    if plan.get("copies_files") is not False:
+        errors.append("live apply executor plan must not copy files")
+    if plan.get("runs_services") is not False:
+        errors.append("live apply executor plan must not run services")
+    if plan.get("summary", {}).get("safe_to_apply_live") is not False:
+        errors.append("live apply executor plan must not declare live apply safe")
+
+    gates = plan.get("gates", [])
+    failed_required_gates = [
+        gate.get("id") for gate in gates
+        if gate.get("required") is True and gate.get("ok") is not True
+    ]
+
+    runbook_steps = [
+        {
+            "order": 10,
+            "phase": "human_safety",
+            "title": "Confirm local recovery access",
+            "action": "Do not proceed unless local console or physical recovery access is available.",
+            "automated": False,
+            "live_change": False,
+        },
+        {
+            "order": 20,
+            "phase": "fresh_evidence",
+            "title": "Generate fresh full dress rehearsal",
+            "action": "Run full dress rehearsal against fake roots and confirm it passes.",
+            "automated": False,
+            "live_change": False,
+        },
+        {
+            "order": 30,
+            "phase": "fresh_evidence",
+            "title": "Generate fresh rollback rehearsal",
+            "action": "Create and validate rollback guard units in fake root.",
+            "automated": False,
+            "live_change": False,
+        },
+        {
+            "order": 40,
+            "phase": "fresh_evidence",
+            "title": "Generate fresh readiness review",
+            "action": "Confirm only remaining critical blocker is live_apply_root_copy_executor.",
+            "automated": False,
+            "live_change": False,
+        },
+        {
+            "order": 50,
+            "phase": "confirmation",
+            "title": "Require exact confirmation phrase",
+            "action": plan.get("required_confirmation_phrase"),
+            "automated": False,
+            "live_change": False,
+        },
+        {
+            "order": 60,
+            "phase": "rollback",
+            "title": "Arm rollback before live changes",
+            "action": "Future executor must arm lilhouse-router-rollback-guard.timer before any live root write or service activation.",
+            "automated": False,
+            "live_change": False,
+        },
+        {
+            "order": 70,
+            "phase": "apply",
+            "title": "Copy staged files into live root",
+            "action": "Future executor only: copy staged, validated files into / after all gates pass.",
+            "automated": False,
+            "live_change": True,
+            "status": "not_implemented",
+        },
+        {
+            "order": 80,
+            "phase": "service_activation",
+            "title": "Activate services in rehearsed order",
+            "action": "Future executor only: daemon-reload, arm rollback, apply sysctl, activate nftables/networkd/timers.",
+            "automated": False,
+            "live_change": True,
+            "status": "not_implemented",
+        },
+        {
+            "order": 90,
+            "phase": "health",
+            "title": "Run live health probes",
+            "action": "Future executor only: run all health probes and require every check to pass.",
+            "automated": False,
+            "live_change": False,
+            "status": "not_implemented",
+        },
+        {
+            "order": 100,
+            "phase": "rollback_cancel",
+            "title": "Cancel rollback only after health pass",
+            "action": "Future executor only: cancel rollback guard only after every required health probe passes.",
+            "automated": False,
+            "live_change": True,
+            "status": "not_implemented",
+        },
+    ]
+
+    result = {
+        "schema": "lilhouse.router_final_deploy_runbook.v1",
+        "mode": "final-deploy-runbook",
+        "apply": False,
+        "live_changes": False,
+        "copies_files": False,
+        "runs_services": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "live_apply_executor_plan": str(plan_path),
+        "ok": not errors,
+        "error_count": len(errors),
+        "errors": errors,
+        "failed_required_gates": failed_required_gates,
+        "runbook_steps": runbook_steps,
+        "summary": {
+            "step_count": len(runbook_steps),
+            "failed_required_gate_count": len(failed_required_gates),
+            "has_live_change_steps": True,
+            "live_change_steps_are_not_implemented": True,
+            "human_recovery_required": True,
+            "rollback_required_before_live_changes": True,
+            "health_required_before_rollback_cancel": True,
+            "safe_to_apply_live": False,
+        },
+    }
+
+    text = json.dumps(result, indent=2, sort_keys=True)
+    if args.out:
+        out_path = Path(args.out).resolve()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(text + "\n", encoding="utf-8")
+
+    print(text)
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

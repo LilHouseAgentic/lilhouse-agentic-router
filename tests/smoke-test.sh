@@ -56,6 +56,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-health-probe-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-health-probe-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-health-probe-rehearsal"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-apply-executor-plan"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-final-deploy-runbook"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -1097,6 +1098,30 @@ assert allow["summary"]["safe_to_apply_live"] is False
 
 allow_gates = {item["id"]: item for item in allow["gates"]}
 assert allow_gates["live_root_explicitly_allowed"]["ok"] is True
+PYJSON
+
+
+"$REPO_DIR/bin/lilhouse-router-final-deploy-runbook" \
+  "$TMP_STATE/router-live-apply-executor-plan-allow.json" \
+  --out "$TMP_STATE/router-final-deploy-runbook-written.json" >"$TMP_STATE/router-final-deploy-runbook.json"
+
+python3 -m json.tool "$TMP_STATE/router-final-deploy-runbook.json" >/dev/null
+python3 -m json.tool "$TMP_STATE/router-final-deploy-runbook-written.json" >/dev/null
+
+python3 - "$TMP_STATE/router-final-deploy-runbook.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_final_deploy_runbook.v1"
+assert data["apply"] is False
+assert data["live_changes"] is False
+assert data["copies_files"] is False
+assert data["runs_services"] is False
+assert data["ok"] is True
+assert data["summary"]["has_live_change_steps"] is True
+assert data["summary"]["live_change_steps_are_not_implemented"] is True
+assert data["summary"]["rollback_required_before_live_changes"] is True
+assert data["summary"]["health_required_before_rollback_cancel"] is True
+assert data["summary"]["safe_to_apply_live"] is False
 PYJSON
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
