@@ -43,6 +43,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-timed-rollback-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-timed-rollback-create"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-timed-rollback-validate"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-timed-rollback-rehearsal"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-confirmation-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -570,6 +571,27 @@ assert data["summary"]["rollback_units_created"] is True
 assert data["summary"]["rollback_units_validated"] is True
 assert data["summary"]["rollback_checks_passed"] == data["summary"]["rollback_checks_total"]
 assert data["summary"]["safe_to_apply_live"] is False
+PYJSON
+
+"$REPO_DIR/bin/lilhouse-router-live-confirmation-plan" \
+  "$TMP_STATE/router-live-readiness.json" \
+  --rollback-rehearsal-report "$ROLLBACK_REHEARSAL_OUT/timed-rollback-rehearsal-report.json" >"$TMP_STATE/router-live-confirmation-plan.json"
+
+python3 -m json.tool "$TMP_STATE/router-live-confirmation-plan.json" >/dev/null
+
+python3 - "$TMP_STATE/router-live-confirmation-plan.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_live_confirmation_plan.v1"
+assert data["apply"] is False
+assert data["live_changes"] is False
+assert data["ok"] is True
+assert data["summary"]["confirmation_gate_defined"] is True
+assert data["summary"]["ready_for_live_apply"] is False
+assert data["summary"]["safe_to_apply_live"] is False
+assert data["confirmation_policy"]["requires_exact_confirmation_phrase"] is True
+assert data["confirmation_policy"]["reject_plain_yes"] is True
+assert data["summary"]["checks_passed"] == data["summary"]["checks_total"]
 PYJSON
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
