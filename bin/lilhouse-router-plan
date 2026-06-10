@@ -191,6 +191,21 @@ plan = {
             "intent": "Enable LilHouse observe and health workers.",
             "risk": "low",
             "apply_status": "observe_only_available",
+            "planned_files": [
+                "/etc/systemd/system/lilhouse-current-state.service",
+                "/etc/systemd/system/lilhouse-current-state.timer",
+                "/etc/systemd/system/lilhouse-storage-health.service",
+                "/etc/systemd/system/lilhouse-storage-health.timer"
+            ],
+            "planned_settings": {
+                "current_state_timer": "every_60_seconds",
+                "storage_health_timer": "every_5_minutes",
+                "wan_health_timer": "planned_future",
+                "dns_health_timer": "planned_future",
+                "cake_health_timer": "planned_future",
+                "highest_brain_notifications": "planned_future",
+                "comment": "Observe worker timers are available today in observe-only install mode. Router-specific telemetry timers are planned separately."
+            },
         },
     ],
 }
