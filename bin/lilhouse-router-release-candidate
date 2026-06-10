@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+CONFIRMATION_PHRASE = "I have local console access and accept temporary network interruption"
+
+
+def run_json(cmd):
+    out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
+    return json.loads(out)
+
+
+def write_json(path: Path, data):
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Build a complete non-live LilHouse router release-candidate proof bundle."
+    )
+    parser.add_argument("--out-dir", required=True)
+    parser.add_argument("--source-root", required=True)
+    parser.add_argument("--stage-root", required=True)
+    parser.add_argument("--apply-target-root", required=True)
+    parser.add_argument("--unit-target-root", required=True)
+    parser.add_argument("--wan", default="eth0")
+    parser.add_argument("--lan", default="eth1")
+    parser.add_argument("--lan-ip", default="10.23.0.1")
+    parser.add_argument("--dns-test-name", default="example.com")
+    parser.add_argument("--wan-test-ip", default="1.1.1.1")
+    parser.add_argument("--timeout-seconds", type=int, default=120)
+    parser.add_argument("--rollback-timeout-minutes", type=int, default=5)
+    parser.add_argument("--enable-cake", action="store_true")
+    parser.add_argument("--enable-ipv6", action="store_true")
+    args = parser.parse_args()
+
+    script_dir = Path(__file__).resolve().parent
+    out_dir = Path(args.out_dir).resolve()
+    source_root = Path(args.source_root).resolve()
+    stage_root = Path(args.stage_root).resolve()
+    apply_target_root = Path(args.apply_target_root).resolve()
+    unit_target_root = Path(args.unit_target_root).resolve()
+
+    if stage_root == Path("/") or apply_target_root == Path("/") or unit_target_root == Path("/"):
+        print("ERROR: release candidate refuses live / roots", file=sys.stderr)
+        return 2
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    dress_dir = out_dir / "full-dress"
+    rollback_dir = out_dir / "rollback"
+    health_dir = out_dir / "health"
+    service_dir = out_dir / "service"
+    probe_dir = out_dir / "health-probe"
+    runbook_dir = out_dir / "runbook"
+
+    full_dress_cmd = [
+        str(script_dir / "lilhouse-router-full-dress-rehearsal"),
+        "--out-dir", str(dress_dir),
+        "--source-root", str(source_root),
+        "--stage-root", str(stage_root),
+        "--apply-target-root", str(apply_target_root),
+        "--wan", args.wan,
+        "--lan", args.lan,
+    ]
+    if args.enable_cake:
+        full_dress_cmd.append("--enable-cake")
+    if args.enable_ipv6:
+        full_dress_cmd.append("--enable-ipv6")
+
+    full_dress = run_json(full_dress_cmd)
+    write_json(out_dir / "full-dress-rehearsal.json", full_dress)
+
+    base_readiness = run_json([
+        str(script_dir / "lilhouse-router-live-readiness"),
+        str(dress_dir / "full-dress-rehearsal-report.json"),
+    ])
+    write_json(out_dir / "base-live-readiness.json", base_readiness)
+
+    rollback = run_json([
+        str(script_dir / "lilhouse-router-timed-rollback-rehearsal"),
+        "--out-dir", str(rollback_dir),
+        "--source-root", str(source_root),
+        "--unit-target-root", str(unit_target_root),
+        "--rollback-root", "/",
+        "--timeout-minutes", str(args.rollback_timeout_minutes),
+    ])
+    write_json(out_dir / "timed-rollback-rehearsal.json", rollback)
+
+    confirmation_plan = run_json([
+        str(script_dir / "lilhouse-router-live-confirmation-plan"),
+        str(out_dir / "base-live-readiness.json"),
+        "--rollback-rehearsal-report", str(rollback_dir / "timed-rollback-rehearsal-report.json"),
+    ])
+    write_json(out_dir / "live-confirmation-plan.json", confirmation_plan)
+
+    confirmation_check = run_json([
+        str(script_dir / "lilhouse-router-live-confirmation-check"),
+        str(out_dir / "live-confirmation-plan.json"),
+        "--phrase", CONFIRMATION_PHRASE,
+    ])
+    write_json(out_dir / "live-confirmation-check.json", confirmation_check)
+
+    health = run_json([
+        str(script_dir / "lilhouse-router-post-apply-health-rehearsal"),
+        "--out-dir", str(health_dir),
+        "--apply-plan", str(dress_dir / "apply-plan.json"),
+        "--lan-ip", args.lan_ip,
+        "--dns-test-name", args.dns_test_name,
+        "--wan-test-ip", args.wan_test_ip,
+        "--timeout-seconds", str(args.timeout_seconds),
+    ])
+    write_json(out_dir / "post-apply-health-rehearsal.json", health)
+
+    service = run_json([
+        str(script_dir / "lilhouse-router-service-activation-rehearsal"),
+        "--out-dir", str(service_dir),
+        "--apply-plan", str(dress_dir / "apply-plan.json"),
+        "--rollback-rehearsal-report", str(rollback_dir / "timed-rollback-rehearsal-report.json"),
+        "--health-rehearsal-report", str(health_dir / "post-apply-health-rehearsal-report.json"),
+    ])
+    write_json(out_dir / "service-activation-rehearsal.json", service)
+
+    probe = run_json([
+        str(script_dir / "lilhouse-router-health-probe-rehearsal"),
+        "--out-dir", str(probe_dir),
+        "--health-rehearsal-report", str(health_dir / "post-apply-health-rehearsal-report.json"),
+        "--lan-ip", args.lan_ip,
+        "--dns-test-name", args.dns_test_name,
+        "--wan-test-ip", args.wan_test_ip,
+        "--timeout-seconds", str(args.timeout_seconds),
+    ])
+    write_json(out_dir / "health-probe-rehearsal.json", probe)
+
+    readiness_review = run_json([
+        str(script_dir / "lilhouse-router-live-readiness-review"),
+        str(dress_dir / "full-dress-rehearsal-report.json"),
+        "--rollback-rehearsal-report", str(rollback_dir / "timed-rollback-rehearsal-report.json"),
+        "--confirmation-plan-report", str(out_dir / "live-confirmation-plan.json"),
+        "--confirmation-check-report", str(out_dir / "live-confirmation-check.json"),
+        "--health-rehearsal-report", str(health_dir / "post-apply-health-rehearsal-report.json"),
+        "--service-rehearsal-report", str(service_dir / "service-activation-rehearsal-report.json"),
+        "--health-probe-rehearsal-report", str(probe_dir / "health-probe-rehearsal-report.json"),
+    ])
+    write_json(out_dir / "live-readiness-review.json", readiness_review)
+
+    executor_plan = run_json([
+        str(script_dir / "lilhouse-router-live-apply-executor-plan"),
+        str(out_dir / "live-readiness-review.json"),
+        "--confirmation-check-report", str(out_dir / "live-confirmation-check.json"),
+        "--allow-live-root",
+    ])
+    write_json(out_dir / "live-apply-executor-plan.json", executor_plan)
+
+    runbook = run_json([
+        str(script_dir / "lilhouse-router-final-deploy-runbook"),
+        str(out_dir / "live-apply-executor-plan.json"),
+        "--out", str(runbook_dir / "final-deploy-runbook.json"),
+    ])
+    write_json(out_dir / "final-deploy-runbook.json", runbook)
+
+    artifacts = {
+        "full_dress": str(out_dir / "full-dress-rehearsal.json"),
+        "base_live_readiness": str(out_dir / "base-live-readiness.json"),
+        "timed_rollback": str(out_dir / "timed-rollback-rehearsal.json"),
+        "confirmation_plan": str(out_dir / "live-confirmation-plan.json"),
+        "confirmation_check": str(out_dir / "live-confirmation-check.json"),
+        "health": str(out_dir / "post-apply-health-rehearsal.json"),
+        "service": str(out_dir / "service-activation-rehearsal.json"),
+        "health_probe": str(out_dir / "health-probe-rehearsal.json"),
+        "readiness_review": str(out_dir / "live-readiness-review.json"),
+        "executor_plan": str(out_dir / "live-apply-executor-plan.json"),
+        "runbook": str(out_dir / "final-deploy-runbook.json"),
+    }
+
+    checks = [
+        ("full_dress_ok", full_dress.get("ok") is True),
+        ("rollback_ok", rollback.get("ok") is True),
+        ("confirmation_accepted", confirmation_check.get("accepted") is True),
+        ("health_ok", health.get("ok") is True),
+        ("service_ok", service.get("ok") is True),
+        ("health_probe_ok", probe.get("ok") is True),
+        ("readiness_review_ok", readiness_review.get("ok") is True),
+        ("readiness_review_not_live", readiness_review.get("ready_for_live_apply") is False),
+        ("executor_plan_ok", executor_plan.get("ok") is True),
+        ("executor_plan_not_live", executor_plan.get("summary", {}).get("safe_to_apply_live") is False),
+        ("runbook_ok", runbook.get("ok") is True),
+        ("runbook_not_live", runbook.get("summary", {}).get("safe_to_apply_live") is False),
+    ]
+
+    ok = all(value for _, value in checks)
+
+    result = {
+        "schema": "lilhouse.router_release_candidate.v1",
+        "mode": "release-candidate",
+        "apply": False,
+        "live_changes": False,
+        "copies_files": False,
+        "runs_services": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "out_dir": str(out_dir),
+        "ok": ok,
+        "checks": [{"name": name, "ok": value} for name, value in checks],
+        "artifacts": artifacts,
+        "summary": {
+            "checks_passed": sum(1 for _, value in checks if value),
+            "checks_total": len(checks),
+            "artifact_count": len(artifacts),
+            "non_live_pipeline_proven": ok,
+            "ready_for_live_apply": False,
+            "safe_to_apply_live": False,
+        },
+    }
+
+    report_path = out_dir / "release-candidate-report.json"
+    write_json(report_path, result)
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -57,6 +57,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-health-probe-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-health-probe-rehearsal"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-apply-executor-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-final-deploy-runbook"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-release-candidate"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -1121,6 +1122,57 @@ assert data["summary"]["has_live_change_steps"] is True
 assert data["summary"]["live_change_steps_are_not_implemented"] is True
 assert data["summary"]["rollback_required_before_live_changes"] is True
 assert data["summary"]["health_required_before_rollback_cancel"] is True
+assert data["summary"]["safe_to_apply_live"] is False
+PYJSON
+
+
+RC_SOURCE="$TMP_STATE/router-rc-source"
+RC_STAGE="$TMP_STATE/router-rc-stage"
+RC_APPLY="$TMP_STATE/router-rc-apply"
+RC_UNITS="$TMP_STATE/router-rc-units"
+RC_OUT="$TMP_STATE/router-rc-out"
+
+mkdir -p "$RC_SOURCE/etc/pihole" "$RC_SOURCE/etc/systemd/system" "$RC_SOURCE/etc/sysctl.d"
+echo "# fake nftables" > "$RC_SOURCE/etc/nftables.conf"
+echo "net.ipv4.ip_forward=1" > "$RC_SOURCE/etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+echo "# fake pihole" > "$RC_SOURCE/etc/pihole/test.conf"
+echo "# fake current-state service" > "$RC_SOURCE/etc/systemd/system/lilhouse-current-state.service"
+
+"$REPO_DIR/bin/lilhouse-router-release-candidate" \
+  --out-dir "$RC_OUT" \
+  --source-root "$RC_SOURCE" \
+  --stage-root "$RC_STAGE" \
+  --apply-target-root "$RC_APPLY" \
+  --unit-target-root "$RC_UNITS" \
+  --wan eth0 \
+  --lan eth1 \
+  --lan-ip 10.23.0.1 \
+  --dns-test-name example.com \
+  --wan-test-ip 1.1.1.1 \
+  --timeout-seconds 120 \
+  --rollback-timeout-minutes 5 \
+  --enable-cake \
+  --enable-ipv6 >"$TMP_STATE/router-release-candidate.json"
+
+python3 -m json.tool "$TMP_STATE/router-release-candidate.json" >/dev/null
+test -f "$RC_OUT/release-candidate-report.json"
+test -f "$RC_OUT/final-deploy-runbook.json"
+test -f "$RC_OUT/live-apply-executor-plan.json"
+test -f "$RC_OUT/live-readiness-review.json"
+
+python3 - "$TMP_STATE/router-release-candidate.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_release_candidate.v1"
+assert data["apply"] is False
+assert data["live_changes"] is False
+assert data["copies_files"] is False
+assert data["runs_services"] is False
+assert data["ok"] is True
+assert data["summary"]["checks_passed"] == data["summary"]["checks_total"]
+assert data["summary"]["artifact_count"] >= 10
+assert data["summary"]["non_live_pipeline_proven"] is True
+assert data["summary"]["ready_for_live_apply"] is False
 assert data["summary"]["safe_to_apply_live"] is False
 PYJSON
 
