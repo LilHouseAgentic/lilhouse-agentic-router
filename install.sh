@@ -77,11 +77,14 @@ done
 if [ "$MODE" = "router-deploy" ]; then
   if [ "$WIZARD" -eq 1 ] && [ "$DRY_RUN" -eq 1 ]; then
     OUT="${ROUTER_WIZARD_OUT_DIR:-${LILHOUSE_STATE_DIR:-./state}/router-wizard-dry-run}"
+    WIZARD_WAN="${ROUTER_WIZARD_WAN:-eth0}"
+    WIZARD_LAN="${ROUTER_WIZARD_LAN:-eth1}"
     echo "Router-deploy dry-run wizard requested."
     echo
     echo "No system changes will be made."
+    echo "Preview interfaces: WAN=$WIZARD_WAN LAN=$WIZARD_LAN"
     echo
-    "$REPO_DIR/bin/lilhouse-router-wizard" --out-dir "$OUT"
+    "$REPO_DIR/bin/lilhouse-router-wizard" --out-dir "$OUT" --wan "$WIZARD_WAN" --lan "$WIZARD_LAN"
     exit $?
   fi
 
