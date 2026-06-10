@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def run_json(cmd):
+    out = subprocess.check_output(cmd, text=True)
+    return json.loads(out)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Validate a non-live LilHouse router apply-create target root."
+    )
+    parser.add_argument("target_root", help="Non-live root populated by lilhouse-router-apply-create.")
+    args = parser.parse_args()
+
+    target_root = Path(args.target_root).resolve()
+
+    if str(target_root) == "/":
+        print("ERROR: refusing to validate live / as apply target", file=sys.stderr)
+        return 2
+
+    if not target_root.is_dir():
+        print(f"ERROR: target root not found: {target_root}", file=sys.stderr)
+        return 1
+
+    report_path = target_root / "apply-create-report.json"
+    if not report_path.is_file():
+        print(f"ERROR: apply-create report not found: {report_path}", file=sys.stderr)
+        return 1
+
+    apply_report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    script_dir = Path(__file__).resolve().parent
+    stage_validate = run_json([
+        str(script_dir / "lilhouse-router-stage-validate"),
+        str(target_root),
+    ])
+
+    copied_entries = apply_report.get("copied", [])
+    missing_after_copy = []
+    for item in copied_entries:
+        target = Path(item["target"])
+        if not target.is_file():
+            missing_after_copy.append(str(target))
+
+    errors = []
+    if apply_report.get("schema") != "lilhouse.router_apply_create.v1":
+        errors.append("apply-create report schema mismatch")
+    if apply_report.get("ok") is not True:
+        errors.append("apply-create report is not OK")
+    if apply_report.get("live_changes") is not False:
+        errors.append("apply-create report must declare live_changes false")
+    if apply_report.get("live_root_allowed") is not False:
+        errors.append("apply-create report must declare live_root_allowed false")
+    if stage_validate.get("ok") is not True:
+        errors.append("stage validation failed on apply target")
+    for path in missing_after_copy:
+        errors.append(f"copied target missing after apply-create: {path}")
+
+    copied_count = apply_report.get("copied_count")
+    expected_copy_count = apply_report.get("summary", {}).get("expected_copy_count")
+
+    if copied_count != expected_copy_count:
+        errors.append("copied_count does not match expected_copy_count")
+
+    result = {
+        "schema": "lilhouse.router_apply_validate.v1",
+        "mode": "apply-validate",
+        "apply": False,
+        "live_changes": False,
+        "live_root_allowed": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "target_root": str(target_root),
+        "apply_report": str(report_path),
+        "ok": not errors,
+        "error_count": len(errors),
+        "errors": errors,
+        "summary": {
+            "copied_count": copied_count,
+            "expected_copy_count": expected_copy_count,
+            "stage_validate_ok": stage_validate.get("ok") is True,
+            "stage_validate_errors": stage_validate.get("error_count"),
+            "missing_after_copy": len(missing_after_copy),
+            "safe_to_apply_live": False,
+        },
+        "reports": {
+            "apply_create": apply_report,
+            "stage_validate": stage_validate,
+        },
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
