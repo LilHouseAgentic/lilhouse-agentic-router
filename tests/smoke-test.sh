@@ -58,6 +58,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-health-probe-rehearsal"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-apply-executor-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-final-deploy-runbook"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-release-candidate"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-release-candidate-summary"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -1174,6 +1175,38 @@ assert data["summary"]["artifact_count"] >= 10
 assert data["summary"]["non_live_pipeline_proven"] is True
 assert data["summary"]["ready_for_live_apply"] is False
 assert data["summary"]["safe_to_apply_live"] is False
+PYJSON
+
+
+"$REPO_DIR/bin/lilhouse-router-release-candidate-summary" \
+  "$RC_OUT/release-candidate-report.json" >"$TMP_STATE/router-release-candidate-summary.txt"
+
+"$REPO_DIR/bin/lilhouse-router-release-candidate-summary" \
+  "$RC_OUT/release-candidate-report.json" \
+  --json >"$TMP_STATE/router-release-candidate-summary-with-json.txt"
+
+grep -q "LilHouse Router Release Candidate" "$TMP_STATE/router-release-candidate-summary.txt"
+grep -q "Status: PASS" "$TMP_STATE/router-release-candidate-summary.txt"
+grep -q "Checks: 12/12" "$TMP_STATE/router-release-candidate-summary.txt"
+grep -q "Safe to apply live: NO" "$TMP_STATE/router-release-candidate-summary.txt"
+grep -q "Ready for live apply: NO" "$TMP_STATE/router-release-candidate-summary.txt"
+
+python3 - "$TMP_STATE/router-release-candidate-summary-with-json.txt" <<'PYJSON'
+import json, sys
+text = open(sys.argv[1]).read()
+start = text.rfind('\n{')
+if start == -1:
+    raise SystemExit("summary JSON object not found")
+data = json.loads(text[start + 1:])
+assert data["schema"] == "lilhouse.router_release_candidate_summary.v1"
+assert data["ok"] is True
+assert data["checks_passed"] == data["checks_total"]
+assert data["non_live_pipeline_proven"] is True
+assert data["ready_for_live_apply"] is False
+assert data["safe_to_apply_live"] is False
+assert data["runbook"]
+assert data["readiness_review"]
+assert data["executor_plan"]
 PYJSON
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"

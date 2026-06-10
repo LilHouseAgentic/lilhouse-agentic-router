@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from pathlib import Path
+
+
+def status(value: bool) -> str:
+    return "PASS" if value is True else "FAIL"
+
+
+def yn(value: bool) -> str:
+    return "YES" if value is True else "NO"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Print a human-readable summary of a LilHouse router release-candidate report."
+    )
+    parser.add_argument("release_candidate_report")
+    parser.add_argument("--json", action="store_true", help="Also emit compact summary JSON.")
+    args = parser.parse_args()
+
+    report_path = Path(args.release_candidate_report).resolve()
+    if not report_path.is_file():
+        print(f"ERROR: release candidate report not found: {report_path}", file=sys.stderr)
+        return 1
+
+    data = json.loads(report_path.read_text(encoding="utf-8"))
+    errors = []
+
+    if data.get("schema") != "lilhouse.router_release_candidate.v1":
+        errors.append("input is not a release-candidate report")
+
+    summary = data.get("summary", {})
+    checks = data.get("checks", [])
+    artifacts = data.get("artifacts", {})
+
+    failed_checks = [item.get("name", "unknown") for item in checks if item.get("ok") is not True]
+
+    compact = {
+        "schema": "lilhouse.router_release_candidate_summary.v1",
+        "source": str(report_path),
+        "ok": data.get("ok") is True and not errors,
+        "errors": errors,
+        "checks_passed": summary.get("checks_passed"),
+        "checks_total": summary.get("checks_total"),
+        "failed_checks": failed_checks,
+        "artifact_count": summary.get("artifact_count"),
+        "apply": data.get("apply"),
+        "live_changes": data.get("live_changes"),
+        "copies_files": data.get("copies_files"),
+        "runs_services": data.get("runs_services"),
+        "non_live_pipeline_proven": summary.get("non_live_pipeline_proven"),
+        "ready_for_live_apply": summary.get("ready_for_live_apply"),
+        "safe_to_apply_live": summary.get("safe_to_apply_live"),
+        "runbook": artifacts.get("runbook"),
+        "readiness_review": artifacts.get("readiness_review"),
+        "executor_plan": artifacts.get("executor_plan"),
+    }
+
+    print("LilHouse Router Release Candidate")
+    print("=================================")
+    print(f"Source: {report_path}")
+    print(f"Status: {status(compact['ok'])}")
+    print()
+    print(f"Checks: {compact['checks_passed']}/{compact['checks_total']}")
+    print(f"Artifacts: {compact['artifact_count']}")
+    print(f"Non-live pipeline proven: {yn(compact['non_live_pipeline_proven'])}")
+    print()
+    print("Safety flags")
+    print("------------")
+    print(f"Apply: {yn(compact['apply'])}")
+    print(f"Live changes: {yn(compact['live_changes'])}")
+    print(f"Copies files: {yn(compact['copies_files'])}")
+    print(f"Runs services: {yn(compact['runs_services'])}")
+    print(f"Ready for live apply: {yn(compact['ready_for_live_apply'])}")
+    print(f"Safe to apply live: {yn(compact['safe_to_apply_live'])}")
+    print()
+    print("Important artifacts")
+    print("-------------------")
+    print(f"Readiness review: {compact['readiness_review']}")
+    print(f"Executor plan: {compact['executor_plan']}")
+    print(f"Runbook: {compact['runbook']}")
+
+    if failed_checks:
+        print()
+        print("Failed checks")
+        print("-------------")
+        for name in failed_checks:
+            print(f"- {name}")
+
+    if errors:
+        print()
+        print("Errors")
+        print("------")
+        for error in errors:
+            print(f"- {error}")
+
+    if args.json:
+        print()
+        print(json.dumps(compact, indent=2, sort_keys=True))
+
+    return 0 if compact["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
