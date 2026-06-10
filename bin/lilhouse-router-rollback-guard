@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+SERVICE_NAME = "lilhouse-router-rollback.service"
+TIMER_NAME = "lilhouse-router-rollback.timer"
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def load_json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception as e:
+        raise SystemExit(f"failed to read JSON {path}: {e}")
+
+
+def unit_dir_for_root(root):
+    return root / "etc/systemd/system"
+
+
+def write_units(target_root, backup_dir, timeout_minutes):
+    unit_dir = unit_dir_for_root(target_root)
+    unit_dir.mkdir(parents=True, exist_ok=True)
+
+    service_path = unit_dir / SERVICE_NAME
+    timer_path = unit_dir / TIMER_NAME
+
+    service_text = f"""[Unit]
+Description=LilHouse router emergency rollback
+Documentation=file:/etc/lilhouse/rollback-notes.txt
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/lilhouse-router-restore-create {backup_dir} --root / --yes --allow-live-root
+"""
+
+    timer_text = f"""[Unit]
+Description=LilHouse router emergency rollback timer
+
+[Timer]
+OnActiveSec={timeout_minutes}min
+Unit={SERVICE_NAME}
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
+"""
+
+    service_path.write_text(service_text, encoding="utf-8")
+    timer_path.write_text(timer_text, encoding="utf-8")
+
+    return service_path, timer_path
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Create rollback guard units for router live apply.")
+    ap.add_argument("--backup-report", required=True)
+    ap.add_argument("--target-root", default="/")
+    ap.add_argument("--timeout-minutes", type=int, default=5)
+    ap.add_argument("--yes", action="store_true", help="Required to create rollback guard units.")
+    ap.add_argument("--allow-live-root", action="store_true", help="Required when --target-root /.")
+    ap.add_argument("--out", default="")
+    args = ap.parse_args()
+
+    target_root = Path(args.target_root).resolve()
+
+    if not args.yes:
+        print("ERROR: refusing to create rollback guard units without --yes", file=sys.stderr)
+        return 2
+
+    if target_root == Path("/") and not args.allow_live_root:
+        print("ERROR: refusing to write rollback guard units into live / without --allow-live-root", file=sys.stderr)
+        return 2
+
+    if args.timeout_minutes < 1:
+        print("ERROR: timeout must be at least 1 minute", file=sys.stderr)
+        return 2
+
+    backup = load_json(args.backup_report)
+
+    if backup.get("schema") != "lilhouse.router_live_backup.v1":
+        print("ERROR: backup report schema mismatch", file=sys.stderr)
+        return 2
+
+    if backup.get("ok") is not True:
+        print("ERROR: backup report is not OK", file=sys.stderr)
+        return 2
+
+    if backup.get("summary", {}).get("ready_for_rollback_arm") is not True:
+        print("ERROR: backup report did not approve rollback arm", file=sys.stderr)
+        return 2
+
+    backup_dir = backup.get("inputs", {}).get("backup_dir")
+    if not backup_dir:
+        print("ERROR: backup report does not include inputs.backup_dir", file=sys.stderr)
+        return 2
+
+    service_path, timer_path = write_units(target_root, backup_dir, args.timeout_minutes)
+
+    report = {
+        "schema": "lilhouse.router_rollback_guard.v1",
+        "ok": True,
+        "generated_at": now_iso(),
+        "mode": "rollback-guard-unit-create",
+        "inputs": {
+            "backup_report": str(Path(args.backup_report)),
+            "backup_dir": backup_dir,
+            "target_root": str(target_root),
+            "timeout_minutes": args.timeout_minutes,
+            "allow_live_root": args.allow_live_root,
+            "yes": args.yes,
+        },
+        "safety": {
+            "apply": False,
+            "live_changes": target_root == Path("/"),
+            "copies_files": True,
+            "writes_unit_files": True,
+            "runs_services": False,
+            "starts_timer": False,
+            "modifies_router_config": False,
+            "touches_network": False,
+            "touches_firewall": False,
+            "touches_dns": False,
+            "touches_dhcp": False,
+            "touches_cake": False,
+        },
+        "summary": {
+            "service_unit": str(service_path),
+            "timer_unit": str(timer_path),
+            "rollback_units_created": True,
+            "rollback_timer_started": False,
+            "ready_for_rollback_start": True,
+            "ready_for_live_apply": False,
+            "safe_to_apply_live": False,
+            "next_gate": "rollback-start",
+        },
+    }
+
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
