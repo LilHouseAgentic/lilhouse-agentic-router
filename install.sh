@@ -97,6 +97,8 @@ backup_existing /usr/local/bin/lilhouse-storage-health
 backup_existing /usr/local/bin/lilhouse-status
 backup_existing /etc/systemd/system/lilhouse-current-state.service
 backup_existing /etc/systemd/system/lilhouse-current-state.timer
+backup_existing /etc/systemd/system/lilhouse-storage-health.service
+backup_existing /etc/systemd/system/lilhouse-storage-health.timer
 backup_existing /etc/systemd/system/lilhouse-status.service
 
 install -m 0755 "$REPO_DIR/lib/lilhouse-common.sh" "$(root_path /usr/lib/lilhouse/lilhouse-common.sh)"
@@ -108,11 +110,14 @@ install -m 0755 "$REPO_DIR/bin/lilhouse-status" "$(root_path /usr/local/bin/lilh
 
 install -m 0644 "$REPO_DIR/systemd/lilhouse-current-state.service" "$(root_path /etc/systemd/system/lilhouse-current-state.service)"
 install -m 0644 "$REPO_DIR/systemd/lilhouse-current-state.timer" "$(root_path /etc/systemd/system/lilhouse-current-state.timer)"
+install -m 0644 "$REPO_DIR/systemd/lilhouse-storage-health.service" "$(root_path /etc/systemd/system/lilhouse-storage-health.service)"
+install -m 0644 "$REPO_DIR/systemd/lilhouse-storage-health.timer" "$(root_path /etc/systemd/system/lilhouse-storage-health.timer)"
 install -m 0644 "$REPO_DIR/systemd/lilhouse-status.service" "$(root_path /etc/systemd/system/lilhouse-status.service)"
 
 if [ "$ENABLE_SYSTEMD" -eq 1 ]; then
   systemctl daemon-reload
   systemctl enable --now lilhouse-current-state.timer
+  systemctl enable --now lilhouse-storage-health.timer
 else
   echo "Systemd enable/start skipped."
 fi
@@ -124,3 +129,4 @@ echo "Try:"
 echo "  lilhouse-current-state"
 echo "  lilhouse-status"
 echo "  systemctl status lilhouse-current-state.timer --no-pager"
+echo "  systemctl status lilhouse-storage-health.timer --no-pager"

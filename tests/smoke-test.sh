@@ -23,6 +23,8 @@ test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
 test -f "$TMP_ROOT/etc/systemd/system/lilhouse-current-state.service"
 test -f "$TMP_ROOT/etc/systemd/system/lilhouse-current-state.timer"
+test -f "$TMP_ROOT/etc/systemd/system/lilhouse-storage-health.service"
+test -f "$TMP_ROOT/etc/systemd/system/lilhouse-storage-health.timer"
 test -f "$TMP_ROOT/etc/systemd/system/lilhouse-status.service"
 
 echo

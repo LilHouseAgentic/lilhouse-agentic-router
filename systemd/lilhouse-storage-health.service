@@ -1,0 +1,11 @@
+[Unit]
+Description=LilHouse storage health worker
+Documentation=https://github.com/YOURNAME/lilhouse-agentic-router
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/lilhouse/lilhouse.env
+Environment=LILHOUSE_COMMON=/usr/lib/lilhouse/lilhouse-common.sh
+ExecStart=/usr/local/bin/lilhouse-storage-health
+User=root
+Group=root

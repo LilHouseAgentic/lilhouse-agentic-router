@@ -1,0 +1,11 @@
+[Unit]
+Description=Run LilHouse storage health worker every 5 minutes
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=lilhouse-storage-health.service
+
+[Install]
+WantedBy=timers.target

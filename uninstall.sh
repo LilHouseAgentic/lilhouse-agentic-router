@@ -9,10 +9,14 @@ fi
 echo "Uninstalling LilHouse Agentic Router observe-only core..."
 
 systemctl disable --now lilhouse-current-state.timer 2>/dev/null || true
+systemctl disable --now lilhouse-storage-health.timer 2>/dev/null || true
 systemctl stop lilhouse-current-state.service 2>/dev/null || true
+systemctl stop lilhouse-storage-health.service 2>/dev/null || true
 
 rm -f /etc/systemd/system/lilhouse-current-state.service
 rm -f /etc/systemd/system/lilhouse-current-state.timer
+rm -f /etc/systemd/system/lilhouse-storage-health.service
+rm -f /etc/systemd/system/lilhouse-storage-health.timer
 rm -f /etc/systemd/system/lilhouse-status.service
 
 rm -f /usr/local/bin/lilhouse-event
