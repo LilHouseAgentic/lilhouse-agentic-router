@@ -201,6 +201,27 @@ if args.enable_cake:
         "intent": "Plan CAKE/SQM setup for latency control.",
         "risk": "medium",
         "apply_status": "not_implemented",
+        "planned_files": [
+            "/etc/systemd/system/lilhouse-cake.service",
+            "/etc/lilhouse/cake.env"
+        ],
+        "planned_settings": {
+            "wan_interface": args.wan,
+            "ifb_interface": "ifb0",
+            "download_direction": "ifb_ingress",
+            "upload_direction": "wan_egress",
+            "qdisc": "cake",
+            "diffserv": "diffserv4",
+            "isolation": "triple-isolate",
+            "nat_aware": True,
+            "split_gso": True,
+            "rtt": "100ms",
+            "upload_ack_filter": True,
+            "download_ack_filter": False,
+            "bandwidth_mode": "requires_baseline_or_dynamic_worker",
+            "dynamic_tuning": "planned_separately",
+            "comment": "CAKE/SQM blueprint only. No qdisc, IFB, or systemd files are changed by this command."
+        },
     })
 
 if args.enable_ipv6:
