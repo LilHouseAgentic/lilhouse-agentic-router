@@ -70,5 +70,17 @@ for mod in modules:
     print(f"- {mod.get('name')} [{mod.get('risk')}] {mod.get('apply_status')}")
     print(f"  {mod.get('intent')}")
 
+    planned_files = mod.get("planned_files") or []
+    if planned_files:
+        print("  Planned files:")
+        for item in planned_files:
+            print(f"    - {item}")
+
+    planned_settings = mod.get("planned_settings") or {}
+    if planned_settings:
+        print("  Planned settings:")
+        for key, value in planned_settings.items():
+            print(f"    - {key}: {value}")
+
 sys.exit(0 if validation.get("ok") else 2)
 PY
