@@ -30,6 +30,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-verify"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-restore-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-restore-create"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-safety-loop"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-stage-preview"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -292,6 +293,17 @@ assert data["summary"]["backed_up"] == data["summary"]["would_restore"]
 assert data["summary"]["backed_up"] == data["summary"]["restored"]
 assert data["summary"]["restore_errors"] == 0
 PYJSON
+
+STAGE_TARGET="$TMP_STATE/router-stage-preview-target"
+"$REPO_DIR/bin/lilhouse-router-stage-preview" "$WIZARD_OUT/preview" --target-root "$STAGE_TARGET" --yes >"$TMP_STATE/router-stage-preview.json"
+python3 -m json.tool "$TMP_STATE/router-stage-preview.json" >/dev/null
+test -f "$STAGE_TARGET/stage-preview-report.json"
+test -f "$STAGE_TARGET/etc/nftables.conf"
+test -f "$STAGE_TARGET/etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+test -f "$STAGE_TARGET/etc/lilhouse/pihole-dns-plan.env"
+test -f "$STAGE_TARGET/MANIFEST.txt"
+grep -q '"schema": "lilhouse.router_stage_preview.v1"' "$TMP_STATE/router-stage-preview.json"
+grep -q '"live_root_allowed": false' "$TMP_STATE/router-stage-preview.json"
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
 "$REPO_DIR/bin/lilhouse-router-wizard" \
