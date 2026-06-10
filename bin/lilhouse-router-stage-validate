@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+REQUIRED_FILES = {
+    "MANIFEST.txt": "preview manifest",
+    "ROLLBACK-NOTES.txt": "rollback notes",
+    "VALIDATION-CHECKLIST.txt": "validation checklist",
+    "etc/nftables.conf": "firewall/NAT preview",
+    "etc/sysctl.d/90-lilhouse-router-forwarding.conf": "forwarding sysctl preview",
+    "etc/systemd/network/20-lilhouse-lan.network": "LAN networkd preview",
+    "etc/lilhouse/pihole-dns-plan.env": "Pi-hole DNS plan",
+    "etc/lilhouse/pihole-dhcp-plan.env": "Pi-hole DHCP plan",
+    "etc/unbound/unbound.conf.d/lilhouse.conf": "Unbound preview",
+    "etc/systemd/system/lilhouse-current-state.service": "current-state service",
+    "etc/systemd/system/lilhouse-current-state.timer": "current-state timer",
+    "etc/systemd/system/lilhouse-storage-health.service": "storage-health service",
+    "etc/systemd/system/lilhouse-storage-health.timer": "storage-health timer",
+}
+
+CONTENT_CHECKS = {
+    "MANIFEST.txt": [
+        "LilHouse router deploy preview manifest",
+        "No files here have been written to the live system",
+    ],
+    "ROLLBACK-NOTES.txt": [
+        "LilHouse router deploy rollback preview",
+        "Do not enable apply mode",
+    ],
+    "VALIDATION-CHECKLIST.txt": [
+        "LilHouse router deploy validation checklist",
+        "current SSH/admin session is protected from lockout",
+    ],
+    "etc/sysctl.d/90-lilhouse-router-forwarding.conf": [
+        "net.ipv4.ip_forward=1",
+    ],
+    "etc/lilhouse/pihole-dns-plan.env": [
+        "pihole",
+        "5335",
+    ],
+    "etc/lilhouse/pihole-dhcp-plan.env": [
+        "LILHOUSE_DHCP_PROVIDER=pihole-FTL",
+    ],
+    "etc/unbound/unbound.conf.d/lilhouse.conf": [
+        "interface: 127.0.0.1",
+        "port: 5335",
+        "edns-buffer-size: 1232",
+    ],
+}
+
+
+def read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Validate a staged LilHouse router root before future apply mode."
+    )
+    parser.add_argument("stage_root", help="Staged target root created by lilhouse-router-stage-preview.")
+    args = parser.parse_args()
+
+    stage_root = Path(args.stage_root).resolve()
+
+    if str(stage_root) == "/":
+        print("ERROR: refusing to validate live / as a staged root", file=sys.stderr)
+        return 2
+
+    if not stage_root.is_dir():
+        print(f"ERROR: staged root not found: {stage_root}", file=sys.stderr)
+        return 1
+
+    entries = []
+    errors = []
+
+    for rel, description in REQUIRED_FILES.items():
+        path = stage_root / rel
+        exists = path.is_file()
+        entry = {
+            "relative_path": rel,
+            "description": description,
+            "path": str(path),
+            "exists": exists,
+            "content_ok": None,
+            "missing_patterns": [],
+        }
+
+        if not exists:
+            errors.append(f"missing required file: {rel}")
+            entries.append(entry)
+            continue
+
+        checks = CONTENT_CHECKS.get(rel, [])
+        if checks:
+            text = read_text(path)
+            missing = [pattern for pattern in checks if pattern not in text]
+            entry["missing_patterns"] = missing
+            entry["content_ok"] = not missing
+            for pattern in missing:
+                errors.append(f"missing content in {rel}: {pattern}")
+        else:
+            entry["content_ok"] = True
+
+        entries.append(entry)
+
+    optional_files = []
+    for rel in ["etc/lilhouse/cake.env", "etc/lilhouse/ipv6-plan.env"]:
+        path = stage_root / rel
+        optional_files.append(
+            {
+                "relative_path": rel,
+                "path": str(path),
+                "exists": path.is_file(),
+            }
+        )
+
+    report = {
+        "schema": "lilhouse.router_stage_validate.v1",
+        "mode": "stage-validate",
+        "apply": False,
+        "live_root_allowed": False,
+        "stage_root": str(stage_root),
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "ok": not errors,
+        "required_count": len(REQUIRED_FILES),
+        "valid_count": sum(1 for e in entries if e["exists"] and e["content_ok"]),
+        "error_count": len(errors),
+        "errors": errors,
+        "entries": entries,
+        "optional_files": optional_files,
+    }
+
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

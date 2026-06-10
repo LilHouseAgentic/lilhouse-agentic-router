@@ -31,6 +31,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-restore-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-restore-create"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-safety-loop"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-stage-preview"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-stage-validate"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -304,6 +305,14 @@ test -f "$STAGE_TARGET/etc/lilhouse/pihole-dns-plan.env"
 test -f "$STAGE_TARGET/MANIFEST.txt"
 grep -q '"schema": "lilhouse.router_stage_preview.v1"' "$TMP_STATE/router-stage-preview.json"
 grep -q '"live_root_allowed": false' "$TMP_STATE/router-stage-preview.json"
+
+"$REPO_DIR/bin/lilhouse-router-stage-validate" "$STAGE_TARGET" >"$TMP_STATE/router-stage-validate.json"
+python3 -m json.tool "$TMP_STATE/router-stage-validate.json" >/dev/null
+grep -q '"schema": "lilhouse.router_stage_validate.v1"' "$TMP_STATE/router-stage-validate.json"
+grep -q '"apply": false' "$TMP_STATE/router-stage-validate.json"
+grep -q '"live_root_allowed": false' "$TMP_STATE/router-stage-validate.json"
+grep -q '"ok": true' "$TMP_STATE/router-stage-validate.json"
+grep -q '"error_count": 0' "$TMP_STATE/router-stage-validate.json"
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
 "$REPO_DIR/bin/lilhouse-router-wizard" \
