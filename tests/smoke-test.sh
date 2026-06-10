@@ -1253,4 +1253,43 @@ grep -q "Enable CAKE: 1" "$FULL_WIZARD_OUT/preview/MANIFEST.txt"
 grep -q "Enable IPv6: 1" "$FULL_WIZARD_OUT/preview/MANIFEST.txt"
 "$REPO_DIR/bin/lilhouse-router-preview-validate" "$FULL_WIZARD_OUT/preview" >/dev/null
 
+
+echo
+echo "== run read-only live health probe command in safe test mode =="
+
+HEALTH_PROBE_RUN_JSON="$TMP_STATE/health-probe-run.json"
+set +e
+"$REPO_DIR/bin/lilhouse-router-health-probe-run" >"$TMP_STATE/health-probe-run-refusal.json"
+REFUSAL_RC=$?
+set -e
+test "$REFUSAL_RC" -eq 2
+
+"$REPO_DIR/bin/lilhouse-router-health-probe-run" \
+  --allow-live-probes \
+  --wan lo \
+  --lan lo \
+  --lan-ip 127.0.0.1 \
+  --dns-test-name localhost \
+  --wan-test-ip 127.0.0.1 \
+  --timeout-seconds 1 \
+  --service systemd-networkd \
+  --out "$HEALTH_PROBE_RUN_JSON" >/dev/null
+
+python3 - "$HEALTH_PROBE_RUN_JSON" <<'PYJSON'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text())
+assert report["schema"] == "lilhouse.router_health_probe_run.v1"
+assert report["safety"]["apply"] is False
+assert report["safety"]["live_changes"] is False
+assert report["safety"]["copies_files"] is False
+assert report["safety"]["runs_services"] is False
+assert report["safety"]["writes_config"] is False
+assert report["safety"]["reads_live_state"] is True
+assert report["summary"]["safe_to_apply_live"] is False
+assert report["summary"]["safe_to_cancel_rollback"] is False
+PYJSON
+
 echo "Smoke test passed."

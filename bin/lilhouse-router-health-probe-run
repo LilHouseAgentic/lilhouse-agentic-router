@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import shutil
+import socket
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def run_cmd(argv, timeout=3):
+    exe = shutil.which(argv[0])
+    if not exe:
+        return {
+            "argv": argv,
+            "available": False,
+            "returncode": None,
+            "stdout": "",
+            "stderr": f"{argv[0]} not found",
+            "ok": False,
+        }
+
+    try:
+        p = subprocess.run(
+            [exe, *argv[1:]],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
+        )
+        return {
+            "argv": argv,
+            "available": True,
+            "returncode": p.returncode,
+            "stdout": p.stdout.strip(),
+            "stderr": p.stderr.strip(),
+            "ok": p.returncode == 0,
+        }
+    except subprocess.TimeoutExpired as e:
+        return {
+            "argv": argv,
+            "available": True,
+            "returncode": None,
+            "stdout": (e.stdout or "").strip() if isinstance(e.stdout, str) else "",
+            "stderr": "timeout",
+            "ok": False,
+        }
+
+
+def interface_names():
+    sys_class_net = Path("/sys/class/net")
+    if sys_class_net.exists():
+        return sorted(p.name for p in sys_class_net.iterdir())
+    result = run_cmd(["ip", "-br", "link"])
+    names = []
+    if result["ok"]:
+        for line in result["stdout"].splitlines():
+            if line.strip():
+                names.append(line.split()[0].rstrip(":"))
+    return sorted(set(names))
+
+
+def dns_lookup(name):
+    try:
+        infos = socket.getaddrinfo(name, None)
+        addrs = sorted({item[4][0] for item in infos})
+        return {"name": name, "ok": bool(addrs), "addresses": addrs, "error": None}
+    except Exception as e:
+        return {"name": name, "ok": False, "addresses": [], "error": str(e)}
+
+
+def service_state(name):
+    result = run_cmd(["systemctl", "is-active", name], timeout=3)
+    return {
+        "service": name,
+        "available": result["available"],
+        "active": result["stdout"],
+        "ok": result["ok"],
+        "returncode": result["returncode"],
+        "stderr": result["stderr"],
+    }
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Read-only live router health probes.")
+    ap.add_argument("--allow-live-probes", action="store_true", help="Required. Allows read-only live inspection.")
+    ap.add_argument("--wan", default="eth0")
+    ap.add_argument("--lan", default="eth1")
+    ap.add_argument("--lan-ip", default="10.23.0.1")
+    ap.add_argument("--dns-test-name", default="example.com")
+    ap.add_argument("--wan-test-ip", default="1.1.1.1")
+    ap.add_argument("--timeout-seconds", type=int, default=3)
+    ap.add_argument("--out", default="")
+    ap.add_argument(
+        "--service",
+        action="append",
+        default=[],
+        help="Service to check with systemctl is-active. Can be repeated.",
+    )
+    args = ap.parse_args()
+
+    if not args.allow_live_probes:
+        report = {
+            "schema": "lilhouse.router_health_probe_run.v1",
+            "ok": False,
+            "generated_at": now_iso(),
+            "error": "refusing to inspect live state without --allow-live-probes",
+            "safety": {
+                "apply": False,
+                "live_changes": False,
+                "copies_files": False,
+                "runs_services": False,
+                "writes_config": False,
+                "reads_live_state": False,
+            },
+        }
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 2
+
+    services = args.service or [
+        "systemd-networkd",
+        "nftables",
+        "unbound",
+        "pihole-FTL",
+        "lilhouse-current-state.timer",
+        "lilhouse-storage-health.timer",
+    ]
+
+    names = interface_names()
+
+    probes = {
+        "interfaces": {
+            "ok": args.wan in names and args.lan in names,
+            "names": names,
+            "wan": args.wan,
+            "lan": args.lan,
+            "wan_present": args.wan in names,
+            "lan_present": args.lan in names,
+        },
+        "ip_br_addr": run_cmd(["ip", "-br", "addr"], timeout=args.timeout_seconds),
+        "default_route": run_cmd(["ip", "route", "show", "default"], timeout=args.timeout_seconds),
+        "lan_ip_lookup": run_cmd(["ip", "addr", "show", "dev", args.lan], timeout=args.timeout_seconds),
+        "dns_resolution": dns_lookup(args.dns_test_name),
+        "wan_ping": run_cmd(["ping", "-c", "1", "-W", str(args.timeout_seconds), args.wan_test_ip], timeout=args.timeout_seconds + 2),
+        "services": [service_state(s) for s in services],
+        "rollback_timer": service_state("lilhouse-router-rollback.timer"),
+        "disk_root": run_cmd(["df", "-h", "/"], timeout=args.timeout_seconds),
+    }
+
+    hard_checks = {
+        "wan_present": probes["interfaces"]["wan_present"],
+        "lan_present": probes["interfaces"]["lan_present"],
+        "dns_resolution": probes["dns_resolution"]["ok"],
+        "wan_ping": probes["wan_ping"]["ok"],
+    }
+
+    report = {
+        "schema": "lilhouse.router_health_probe_run.v1",
+        "ok": all(hard_checks.values()),
+        "generated_at": now_iso(),
+        "mode": "read-only-live-probes",
+        "inputs": {
+            "wan": args.wan,
+            "lan": args.lan,
+            "lan_ip": args.lan_ip,
+            "dns_test_name": args.dns_test_name,
+            "wan_test_ip": args.wan_test_ip,
+            "timeout_seconds": args.timeout_seconds,
+        },
+        "safety": {
+            "apply": False,
+            "live_changes": False,
+            "copies_files": False,
+            "runs_services": False,
+            "writes_config": False,
+            "reads_live_state": True,
+        },
+        "hard_checks": hard_checks,
+        "probes": probes,
+        "summary": {
+            "safe_to_apply_live": False,
+            "safe_to_cancel_rollback": False,
+            "next_gate": "live-preflight",
+        },
+    }
+
+    text = json.dumps(report, indent=2, sort_keys=True)
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(text + "\n", encoding="utf-8")
+    print(text)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
