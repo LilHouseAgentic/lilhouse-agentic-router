@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+COMMON="${LILHOUSE_COMMON:-/usr/lib/lilhouse/lilhouse-common.sh}"
+if [ -f "$COMMON" ]; then
+  # shellcheck source=/dev/null
+  . "$COMMON"
+else
+  : "${LILHOUSE_STATE_DIR:=/var/lib/lilhouse}"
+fi
+
+STATE_FILE="${LILHOUSE_CURRENT_STATE_FILE:-$LILHOUSE_STATE_DIR/current-state.json}"
+
+if [ ! -f "$STATE_FILE" ]; then
+  echo "LilHouse status unavailable: no current-state.json found."
+  echo "Run lilhouse-current-state first."
+  exit 1
+fi
+
+python3 - "$STATE_FILE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+state_file = Path(sys.argv[1])
+
+try:
+    data = json.loads(state_file.read_text(encoding="utf-8"))
+except Exception as exc:
+    print(f"LilHouse status unavailable: failed to read {state_file}: {exc}")
+    sys.exit(1)
+
+def get(path, default="unknown"):
+    cur = data
+    for part in path:
+        if not isinstance(cur, dict) or part not in cur:
+            return default
+        cur = cur[part]
+    return cur
+
+hostname = get(["hostname"])
+ts = get(["ts"])
+wan_state = get(["interfaces", "wan", "operstate"])
+wan_carrier = get(["interfaces", "wan", "carrier"])
+lan_state = get(["interfaces", "lan", "operstate"])
+lan_carrier = get(["interfaces", "lan", "carrier"])
+ipv4_default = get(["routes", "ipv4_default"], "")
+ipv6_default = get(["routes", "ipv6_default"], "")
+pihole = get(["services", "pihole_ftl"])
+unbound = get(["services", "unbound"])
+docker = get(["services", "docker"])
+events = get(["ledgers", "events_count"], 0)
+actions = get(["ledgers", "actions_count"], 0)
+proposals = get(["ledgers", "proposals_count"], 0)
+root_used = get(["storage", "root", "used_percent"])
+
+print("LilHouse Agentic Router")
+print("=======================")
+print(f"Host:        {hostname}")
+print(f"Timestamp:   {ts}")
+print()
+print("Interfaces")
+print(f"  WAN:       {wan_state} carrier={wan_carrier}")
+print(f"  LAN:       {lan_state} carrier={lan_carrier}")
+print()
+print("Routes")
+print(f"  IPv4:      {ipv4_default or 'none'}")
+print(f"  IPv6:      {ipv6_default or 'none'}")
+print()
+print("Services")
+print(f"  Pi-hole:   {pihole}")
+print(f"  Unbound:   {unbound}")
+print(f"  Docker:    {docker}")
+print()
+print("Ledgers")
+print(f"  Events:    {events}")
+print(f"  Actions:   {actions}")
+print(f"  Proposals: {proposals}")
+print()
+print("Storage")
+print(f"  Root used: {root_used}%")
+PY
