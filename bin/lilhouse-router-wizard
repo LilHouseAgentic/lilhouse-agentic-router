@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OUT_DIR="${LILHOUSE_STATE_DIR:-./state}/router-wizard"
+WAN=""
+LAN=""
+LAN_IP="10.23.0.1"
+SUBNET="10.23.0.0/24"
+DHCP_START="10.23.0.100"
+DHCP_END="10.23.0.200"
+ENABLE_CAKE=0
+ENABLE_IPV6=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --out-dir)
+      OUT_DIR="${2:-}"
+      shift 2
+      ;;
+    --wan)
+      WAN="${2:-}"
+      shift 2
+      ;;
+    --lan)
+      LAN="${2:-}"
+      shift 2
+      ;;
+    --lan-ip)
+      LAN_IP="${2:-}"
+      shift 2
+      ;;
+    --subnet)
+      SUBNET="${2:-}"
+      shift 2
+      ;;
+    --dhcp-start)
+      DHCP_START="${2:-}"
+      shift 2
+      ;;
+    --dhcp-end)
+      DHCP_END="${2:-}"
+      shift 2
+      ;;
+    --enable-cake)
+      ENABLE_CAKE=1
+      shift
+      ;;
+    --enable-ipv6)
+      ENABLE_IPV6=1
+      shift
+      ;;
+    -h|--help)
+      echo "Usage: lilhouse-router-wizard [options]"
+      echo
+      echo "Plan-only wizard shell. No system changes are made."
+      echo
+      echo "Options:"
+      echo "  --out-dir PATH"
+      echo "  --wan IFACE"
+      echo "  --lan IFACE"
+      echo "  --lan-ip IP"
+      echo "  --subnet CIDR"
+      echo "  --dhcp-start IP"
+      echo "  --dhcp-end IP"
+      echo "  --enable-cake"
+      echo "  --enable-ipv6"
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1"
+      exit 1
+      ;;
+  esac
+done
+
+mkdir -p "$OUT_DIR"
+
+INTERFACE_REPORT="$OUT_DIR/interface-report.json"
+PLAN_JSON="$OUT_DIR/router-plan.json"
+PLAN_SUMMARY="$OUT_DIR/router-plan-summary.txt"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+"$SCRIPT_DIR/lilhouse-interface-report" >"$INTERFACE_REPORT"
+
+if [ -z "$WAN" ] || [ -z "$LAN" ]; then
+  guessed="$(
+    python3 - "$INTERFACE_REPORT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+wan = ""
+lan = ""
+
+for iface in data.get("interfaces", []):
+    roles = iface.get("likely_roles", [])
+    if not wan and "wan_candidate" in roles:
+        wan = iface.get("name", "")
+    if not lan and "lan_candidate" in roles:
+        lan = iface.get("name", "")
+
+print(wan)
+print(lan)
+PY
+  )"
+
+  WAN="${WAN:-$(printf '%s\n' "$guessed" | sed -n '1p')}"
+  LAN="${LAN:-$(printf '%s\n' "$guessed" | sed -n '2p')}"
+fi
+
+if [ -z "$WAN" ] || [ -z "$LAN" ]; then
+  echo "Could not auto-detect both WAN and LAN."
+  echo "Pass --wan IFACE and --lan IFACE."
+  echo "Interface report written to: $INTERFACE_REPORT"
+  exit 2
+fi
+
+plan_args=(
+  --wan "$WAN"
+  --lan "$LAN"
+  --lan-ip "$LAN_IP"
+  --subnet "$SUBNET"
+  --dhcp-start "$DHCP_START"
+  --dhcp-end "$DHCP_END"
+  --output "$PLAN_JSON"
+)
+
+if [ "$ENABLE_CAKE" -eq 1 ]; then
+  plan_args+=(--enable-cake)
+fi
+
+if [ "$ENABLE_IPV6" -eq 1 ]; then
+  plan_args+=(--enable-ipv6)
+fi
+
+"$SCRIPT_DIR/lilhouse-router-plan" "${plan_args[@]}"
+"$SCRIPT_DIR/lilhouse-router-plan-summary" "$PLAN_JSON" >"$PLAN_SUMMARY"
+
+echo "LilHouse router wizard plan generated."
+echo
+echo "No system changes were made."
+echo
+echo "Interface report: $INTERFACE_REPORT"
+echo "Plan JSON:        $PLAN_JSON"
+echo "Plan summary:     $PLAN_SUMMARY"
+echo
+cat "$PLAN_SUMMARY"
