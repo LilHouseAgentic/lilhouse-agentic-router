@@ -115,6 +115,10 @@ test -f "$WIZARD_OUT/preview/etc/nftables.conf"
 test -f "$WIZARD_OUT/preview/etc/lilhouse/pihole-dns-plan.env"
 test -f "$WIZARD_OUT/preview/etc/lilhouse/pihole-dhcp-plan.env"
 test -f "$WIZARD_OUT/preview/etc/unbound/unbound.conf.d/lilhouse.conf"
+test -f "$WIZARD_OUT/preview/etc/systemd/system/lilhouse-current-state.service"
+test -f "$WIZARD_OUT/preview/etc/systemd/system/lilhouse-current-state.timer"
+test -f "$WIZARD_OUT/preview/etc/systemd/system/lilhouse-storage-health.service"
+test -f "$WIZARD_OUT/preview/etc/systemd/system/lilhouse-storage-health.timer"
 
 grep -q "LilHouse router deploy preview" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
 grep -q "\[Match\]" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
@@ -141,6 +145,12 @@ grep -q "LILHOUSE_DHCP_END=10.23.0.200" "$WIZARD_OUT/preview/etc/lilhouse/pihole
 grep -q "interface: 127.0.0.1" "$WIZARD_OUT/preview/etc/unbound/unbound.conf.d/lilhouse.conf"
 grep -q "port: 5335" "$WIZARD_OUT/preview/etc/unbound/unbound.conf.d/lilhouse.conf"
 grep -q "edns-buffer-size: 1232" "$WIZARD_OUT/preview/etc/unbound/unbound.conf.d/lilhouse.conf"
+
+grep -q "ExecStart=/usr/local/bin/lilhouse-current-state" "$WIZARD_OUT/preview/etc/systemd/system/lilhouse-current-state.service"
+grep -q "OnUnitActiveSec=1min" "$WIZARD_OUT/preview/etc/systemd/system/lilhouse-current-state.timer"
+grep -q "ExecStart=/usr/local/bin/lilhouse-storage-health" "$WIZARD_OUT/preview/etc/systemd/system/lilhouse-storage-health.service"
+grep -q "OnUnitActiveSec=15min" "$WIZARD_OUT/preview/etc/systemd/system/lilhouse-storage-health.timer"
+grep -q "WantedBy=timers.target" "$WIZARD_OUT/preview/etc/systemd/system/lilhouse-current-state.timer"
 
 grep -q "lan_static_address" "$WIZARD_OUT/router-plan-summary.txt"
 grep -q "forwarding" "$WIZARD_OUT/router-plan-summary.txt"
