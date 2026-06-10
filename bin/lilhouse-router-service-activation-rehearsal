@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+FAIL_RESULTS = {
+    "daemon_reload_before_enable": True,
+    "arm_rollback_timer": True,
+    "apply_forwarding_sysctl": True,
+    "activate_firewall": False,
+    "activate_networkd": True,
+    "activate_lilhouse_timers": True,
+    "run_post_apply_health": True,
+    "cancel_rollback_only_after_health_pass": True,
+}
+
+PASS_RESULTS = {
+    "daemon_reload_before_enable": True,
+    "arm_rollback_timer": True,
+    "apply_forwarding_sysctl": True,
+    "activate_firewall": True,
+    "activate_networkd": True,
+    "activate_lilhouse_timers": True,
+    "run_post_apply_health": True,
+    "cancel_rollback_only_after_health_pass": True,
+}
+
+
+def run_json(cmd):
+    out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
+    return json.loads(out)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Run non-live service activation rehearsal with simulated fail/pass results."
+    )
+    parser.add_argument("--out-dir", required=True)
+    parser.add_argument("--apply-plan", required=True)
+    parser.add_argument("--rollback-rehearsal-report", required=True)
+    parser.add_argument("--health-rehearsal-report", required=True)
+    args = parser.parse_args()
+
+    script_dir = Path(__file__).resolve().parent
+    out_dir = Path(args.out_dir).resolve()
+    apply_plan = Path(args.apply_plan).resolve()
+    rollback_report = Path(args.rollback_rehearsal_report).resolve()
+    health_report = Path(args.health_rehearsal_report).resolve()
+
+    for label, path in {
+        "apply_plan": apply_plan,
+        "rollback_rehearsal_report": rollback_report,
+        "health_rehearsal_report": health_report,
+    }.items():
+        if not path.is_file():
+            print(f"ERROR: {label} not found: {path}", file=sys.stderr)
+            return 1
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    plan_path = out_dir / "service-activation-plan.json"
+    fail_results_path = out_dir / "service-activation-results-fail.json"
+    pass_results_path = out_dir / "service-activation-results-pass.json"
+
+    fail_results_path.write_text(json.dumps(FAIL_RESULTS, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    pass_results_path.write_text(json.dumps(PASS_RESULTS, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    service_plan = run_json([
+        str(script_dir / "lilhouse-router-service-activation-plan"),
+        str(apply_plan),
+        "--rollback-rehearsal-report", str(rollback_report),
+        "--health-rehearsal-report", str(health_report),
+    ])
+    plan_path.write_text(json.dumps(service_plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    fail_dry_run = run_json([
+        str(script_dir / "lilhouse-router-service-activation-dry-run"),
+        str(plan_path),
+        "--results", str(fail_results_path),
+    ])
+
+    pass_dry_run = run_json([
+        str(script_dir / "lilhouse-router-service-activation-dry-run"),
+        str(plan_path),
+        "--results", str(pass_results_path),
+    ])
+
+    ok = (
+        service_plan.get("ok") is True
+        and fail_dry_run.get("ok") is True
+        and pass_dry_run.get("ok") is True
+        and fail_dry_run.get("summary", {}).get("all_steps_passed") is False
+        and fail_dry_run.get("summary", {}).get("rollback_cancel_allowed_by_sequence") is False
+        and pass_dry_run.get("summary", {}).get("all_steps_passed") is True
+        and pass_dry_run.get("summary", {}).get("rollback_cancel_allowed_by_sequence") is True
+        and pass_dry_run.get("summary", {}).get("safe_to_cancel_rollback_now") is False
+    )
+
+    result = {
+        "schema": "lilhouse.router_service_activation_rehearsal.v1",
+        "mode": "service-activation-rehearsal",
+        "apply": False,
+        "live_changes": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "out_dir": str(out_dir),
+        "apply_plan": str(apply_plan),
+        "ok": ok,
+        "summary": {
+            "service_plan_ok": service_plan.get("ok") is True,
+            "failure_blocks_sequence": fail_dry_run.get("summary", {}).get("all_steps_passed") is False,
+            "failure_blocks_rollback_cancel": fail_dry_run.get("summary", {}).get("rollback_cancel_allowed_by_sequence") is False,
+            "all_pass_allows_rollback_cancel_by_sequence": pass_dry_run.get("summary", {}).get("rollback_cancel_allowed_by_sequence") is True,
+            "safe_to_cancel_rollback_now": False,
+            "safe_to_apply_live": False,
+        },
+        "reports": {
+            "service_plan": service_plan,
+            "fail_dry_run": fail_dry_run,
+            "pass_dry_run": pass_dry_run,
+        },
+    }
+
+    report_path = out_dir / "service-activation-rehearsal-report.json"
+    report_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

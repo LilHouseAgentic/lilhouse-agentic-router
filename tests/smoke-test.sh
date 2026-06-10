@@ -50,6 +50,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-post-apply-health-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-post-apply-health-rehearsal"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-service-activation-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-service-activation-dry-run"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-service-activation-rehearsal"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -813,6 +814,33 @@ assert passed["summary"]["all_steps_passed"] is True
 assert passed["summary"]["rollback_cancel_allowed_by_sequence"] is True
 assert passed["summary"]["safe_to_cancel_rollback_now"] is False
 assert passed["summary"]["safe_to_apply_live"] is False
+PYJSON
+
+
+SERVICE_REHEARSAL_OUT="$TMP_STATE/router-service-activation-rehearsal"
+"$REPO_DIR/bin/lilhouse-router-service-activation-rehearsal" \
+  --out-dir "$SERVICE_REHEARSAL_OUT" \
+  --apply-plan "$DRESS_OUT/apply-plan.json" \
+  --rollback-rehearsal-report "$ROLLBACK_REHEARSAL_OUT/timed-rollback-rehearsal-report.json" \
+  --health-rehearsal-report "$HEALTH_REHEARSAL_OUT/post-apply-health-rehearsal-report.json" >"$TMP_STATE/router-service-activation-rehearsal.json"
+
+python3 -m json.tool "$TMP_STATE/router-service-activation-rehearsal.json" >/dev/null
+test -f "$SERVICE_REHEARSAL_OUT/service-activation-rehearsal-report.json"
+test -f "$SERVICE_REHEARSAL_OUT/service-activation-plan.json"
+
+python3 - "$TMP_STATE/router-service-activation-rehearsal.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_service_activation_rehearsal.v1"
+assert data["apply"] is False
+assert data["live_changes"] is False
+assert data["ok"] is True
+assert data["summary"]["service_plan_ok"] is True
+assert data["summary"]["failure_blocks_sequence"] is True
+assert data["summary"]["failure_blocks_rollback_cancel"] is True
+assert data["summary"]["all_pass_allows_rollback_cancel_by_sequence"] is True
+assert data["summary"]["safe_to_cancel_rollback_now"] is False
+assert data["summary"]["safe_to_apply_live"] is False
 PYJSON
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
