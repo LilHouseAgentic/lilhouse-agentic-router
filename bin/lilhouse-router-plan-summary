@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PLAN_FILE="${1:-}"
+
+if [ -z "$PLAN_FILE" ]; then
+  echo "Usage: lilhouse-router-plan-summary PLAN.json"
+  exit 1
+fi
+
+python3 - "$PLAN_FILE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+
+try:
+    plan = json.loads(path.read_text(encoding="utf-8"))
+except Exception as exc:
+    print(f"Failed to read plan: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+inputs = plan.get("inputs", {})
+validation = plan.get("validation", {})
+modules = plan.get("planned_modules", [])
+
+print("LilHouse Router Deploy Plan")
+print("===========================")
+print()
+print(f"Schema: {plan.get('schema', 'unknown')}")
+print(f"Mode: {plan.get('mode', 'unknown')}")
+print(f"Apply: {plan.get('apply')}")
+print(f"Generated: {plan.get('generated_at', 'unknown')}")
+print()
+print("Inputs")
+print("------")
+print(f"WAN interface: {inputs.get('wan_interface', '')}")
+print(f"LAN interface: {inputs.get('lan_interface', '')}")
+print(f"LAN IP:        {inputs.get('lan_ip', '')}")
+print(f"Subnet:        {inputs.get('subnet', '')}")
+print(f"DHCP start:    {inputs.get('dhcp_start', '')}")
+print(f"DHCP end:      {inputs.get('dhcp_end', '')}")
+print(f"DNS mode:      {inputs.get('dns_mode', '')}")
+print(f"Enable CAKE:   {inputs.get('enable_cake')}")
+print(f"Enable IPv6:   {inputs.get('enable_ipv6')}")
+print()
+print("Validation")
+print("----------")
+print(f"OK: {validation.get('ok')}")
+errors = validation.get("errors") or []
+warnings = validation.get("warnings") or []
+
+if errors:
+    print("Errors:")
+    for item in errors:
+        print(f"- {item}")
+
+if warnings:
+    print("Warnings:")
+    for item in warnings:
+        print(f"- {item}")
+
+if not errors and not warnings:
+    print("No errors or warnings.")
+print()
+print("Planned modules")
+print("---------------")
+for mod in modules:
+    print(f"- {mod.get('name')} [{mod.get('risk')}] {mod.get('apply_status')}")
+    print(f"  {mod.get('intent')}")
+
+sys.exit(0 if validation.get("ok") else 2)
+PY
