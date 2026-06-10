@@ -3,9 +3,36 @@ set -euo pipefail
 
 DESTDIR=""
 ENABLE_SYSTEMD=1
+MODE="observe-only"
+WIZARD=0
+DRY_RUN=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --mode)
+      MODE="${2:-}"
+      if [ -z "$MODE" ]; then
+        echo "Missing value for --mode"
+        exit 1
+      fi
+      case "$MODE" in
+        observe-only|router-deploy) ;;
+        *)
+          echo "Unknown mode: $MODE"
+          echo "Supported modes: observe-only, router-deploy"
+          exit 1
+          ;;
+      esac
+      shift 2
+      ;;
+    --wizard)
+      WIZARD=1
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
     --destdir)
       DESTDIR="${2:-}"
       if [ -z "$DESTDIR" ]; then
@@ -19,8 +46,11 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     -h|--help)
-      echo "Usage: sudo ./install.sh [--destdir PATH] [--no-systemd]"
+      echo "Usage: sudo ./install.sh [--mode observe-only|router-deploy] [--wizard] [--dry-run] [--destdir PATH] [--no-systemd]"
       echo
+      echo "  --mode MODE      Deployment mode: observe-only or router-deploy."
+      echo "  --wizard         Future router deployment wizard flag."
+      echo "  --dry-run        Show intent without applying router-deploy changes."
       echo "  --destdir PATH   Install into a fake root for testing."
       echo "  --no-systemd     Copy files but do not enable/start systemd timer."
       exit 0
@@ -61,6 +91,7 @@ backup_existing() {
 }
 
 echo "Installing LilHouse Agentic Router observe-only core..."
+echo "Mode: $MODE"
 
 if [ -n "$DESTDIR" ]; then
   echo "DESTDIR test install: $DESTDIR"
