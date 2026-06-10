@@ -1016,6 +1016,35 @@ assert data["summary"]["safe_to_cancel_rollback_now"] is False
 assert data["summary"]["safe_to_apply_live"] is False
 PYJSON
 
+
+"$REPO_DIR/bin/lilhouse-router-live-readiness-review" \
+  "$DRESS_OUT/full-dress-rehearsal-report.json" \
+  --rollback-rehearsal-report "$ROLLBACK_REHEARSAL_OUT/timed-rollback-rehearsal-report.json" \
+  --confirmation-plan-report "$TMP_STATE/router-live-confirmation-plan.json" \
+  --confirmation-check-report "$TMP_STATE/router-live-confirmation-check-good.json" \
+  --health-rehearsal-report "$HEALTH_REHEARSAL_OUT/post-apply-health-rehearsal-report.json" \
+  --service-rehearsal-report "$SERVICE_REHEARSAL_OUT/service-activation-rehearsal-report.json" \
+  --health-probe-rehearsal-report "$HEALTH_PROBE_REHEARSAL_OUT/health-probe-rehearsal-report.json" >"$TMP_STATE/router-live-readiness-review-with-health-probe.json"
+
+python3 -m json.tool "$TMP_STATE/router-live-readiness-review-with-health-probe.json" >/dev/null
+
+python3 - "$TMP_STATE/router-live-readiness-review-with-health-probe.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_live_readiness_review.v1"
+assert data["apply"] is False
+assert data["live_changes"] is False
+assert data["ok"] is True
+assert data["ready_for_live_apply"] is False
+assert data["summary"]["non_live_pipeline_proven"] is True
+assert data["summary"]["health_probe_rehearsal_proven"] is True
+assert data["summary"]["safe_to_apply_live"] is False
+
+blockers = {item["id"]: item for item in data["remaining_blockers"]}
+assert blockers["real_health_probe_executor"]["status"] == "probe_rehearsal_proven"
+assert blockers["real_health_probe_executor"]["severity"] == "high"
+PYJSON
+
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
 "$REPO_DIR/bin/lilhouse-router-wizard" \
   --out-dir "$CAKE_WIZARD_OUT" \

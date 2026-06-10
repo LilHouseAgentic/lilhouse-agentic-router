@@ -20,6 +20,7 @@ def main() -> int:
     parser.add_argument("--confirmation-check-report", required=True)
     parser.add_argument("--health-rehearsal-report", required=True)
     parser.add_argument("--service-rehearsal-report", required=True)
+    parser.add_argument("--health-probe-rehearsal-report", required=False)
     args = parser.parse_args()
 
     paths = {
@@ -30,6 +31,9 @@ def main() -> int:
         "health_rehearsal_report": Path(args.health_rehearsal_report).resolve(),
         "service_rehearsal_report": Path(args.service_rehearsal_report).resolve(),
     }
+
+    if args.health_probe_rehearsal_report:
+        paths["health_probe_rehearsal_report"] = Path(args.health_probe_rehearsal_report).resolve()
 
     for label, path in paths.items():
         if not path.is_file():
@@ -42,6 +46,7 @@ def main() -> int:
     confirmation_check = load_json(paths["confirmation_check_report"])
     health = load_json(paths["health_rehearsal_report"])
     service = load_json(paths["service_rehearsal_report"])
+    health_probe = load_json(paths["health_probe_rehearsal_report"]) if "health_probe_rehearsal_report" in paths else None
 
     checks = []
 
@@ -107,6 +112,19 @@ def main() -> int:
         "health failure must block rollback cancellation",
     )
 
+    if health_probe is not None:
+        check(
+            "health_probe_rehearsal_schema",
+            health_probe.get("schema") == "lilhouse.router_health_probe_rehearsal.v1",
+            "health probe rehearsal schema must match",
+        )
+        check("health_probe_rehearsal_ok", health_probe.get("ok") is True, "health probe rehearsal must be OK")
+        check(
+            "health_probe_failure_blocks_cancel",
+            health_probe.get("summary", {}).get("failure_blocks_rollback_cancel") is True,
+            "health probe failure must block rollback cancellation",
+        )
+
     check(
         "service_rehearsal_schema",
         service.get("schema") == "lilhouse.router_service_activation_rehearsal.v1",
@@ -130,9 +148,9 @@ def main() -> int:
         },
         {
             "id": "real_health_probe_executor",
-            "severity": "critical",
-            "status": "missing",
-            "detail": "post-apply health is rehearsed with simulated results only; no live probe runner exists yet.",
+            "severity": "high" if health_probe is not None and health_probe.get("ok") is True else "critical",
+            "status": "probe_rehearsal_proven" if health_probe is not None and health_probe.get("ok") is True else "missing",
+            "detail": "health probe plan/dry-run/rehearsal is proven; real live probe runner still does not execute yet." if health_probe is not None and health_probe.get("ok") is True else "post-apply health is rehearsed with simulated results only; no live probe runner exists yet.",
         },
         {
             "id": "real_service_activation_executor",
@@ -166,6 +184,7 @@ def main() -> int:
             "rollback_rehearsal_proven": rollback.get("ok") is True,
             "confirmation_gate_proven": confirmation_check.get("accepted") is True,
             "health_rehearsal_proven": health.get("ok") is True,
+            "health_probe_rehearsal_proven": health_probe.get("ok") is True if health_probe is not None else False,
             "service_rehearsal_proven": service.get("ok") is True,
             "remaining_blocker_count": len(remaining_blockers),
             "critical_blocker_count": sum(1 for b in remaining_blockers if b["severity"] == "critical"),
