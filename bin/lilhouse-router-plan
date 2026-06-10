@@ -125,6 +125,24 @@ plan = {
             "intent": "Create a baseline firewall and outbound sharing rules.",
             "risk": "high",
             "apply_status": "not_implemented",
+            "planned_files": [
+                "/etc/nftables.conf",
+                "/etc/systemd/system/nftables.service"
+            ],
+            "planned_settings": {
+                "backend": "nftables",
+                "wan_interface": args.wan,
+                "lan_interface": args.lan,
+                "lan_subnet": str(subnet) if subnet is not None else args.subnet,
+                "default_input_policy": "drop_on_wan_allow_lan",
+                "default_forward_policy": "drop_except_lan_to_wan",
+                "nat": "masquerade_lan_to_wan",
+                "allow_established_related": True,
+                "allow_loopback": True,
+                "allow_lan_to_router": True,
+                "allow_wan_to_router": "minimal_dhcp_icmp_related_only",
+                "comment": "Firewall/NAT blueprint only. No nftables files or rules are written by this command."
+            },
         },
         {
             "name": "dns",
