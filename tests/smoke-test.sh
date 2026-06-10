@@ -1771,4 +1771,88 @@ assert report["summary"]["next_gate"] == "operator-review"
 assert report["blockers"] == []
 PYJSON
 
+
+echo
+echo "== run guarded deploy orchestrator dry-run =="
+
+ORCH_PREFLIGHT_JSON="$TMP_STATE/orchestrator-preflight.json"
+ORCH_ROOT="$TMP_STATE/orchestrator-root"
+ORCH_WORK="$TMP_STATE/orchestrator-work"
+ORCH_JSON="$TMP_STATE/orchestrator.json"
+
+cat >"$ORCH_PREFLIGHT_JSON" <<'JSON'
+{
+  "schema": "lilhouse.router_live_preflight.v1",
+  "ok": true,
+  "summary": {
+    "ready_for_live_backup": true,
+    "ready_for_live_apply": false,
+    "safe_to_apply_live": false
+  },
+  "safety": {
+    "apply": false,
+    "live_changes": false,
+    "reads_reports_only": true
+  }
+}
+JSON
+
+set +e
+"$REPO_DIR/bin/lilhouse-router-guarded-deploy-dry-run" \
+  --preflight-report "$ORCH_PREFLIGHT_JSON" \
+  --preview-dir "$FULL_WIZARD_OUT/preview" \
+  --target-root "$ORCH_ROOT" \
+  --work-dir "$ORCH_WORK" >"$TMP_STATE/orchestrator-refusal.json"
+ORCH_REFUSAL_RC=$?
+set -e
+test "$ORCH_REFUSAL_RC" -eq 2
+
+"$REPO_DIR/bin/lilhouse-router-guarded-deploy-dry-run" \
+  --preflight-report "$ORCH_PREFLIGHT_JSON" \
+  --preview-dir "$FULL_WIZARD_OUT/preview" \
+  --target-root "$ORCH_ROOT" \
+  --work-dir "$ORCH_WORK" \
+  --timeout-minutes 5 \
+  --yes \
+  --out "$ORCH_JSON" >"$TMP_STATE/orchestrator.out"
+
+python3 - "$ORCH_JSON" <<'PYJSON'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text())
+assert report["schema"] == "lilhouse.router_guarded_deploy_dry_run.v1"
+assert report["ok"] is True
+assert report["safety"]["apply"] is False
+assert report["safety"]["live_changes"] is False
+assert report["safety"]["target_live_root"] is False
+assert report["safety"]["fake_root_only"] is True
+assert report["safety"]["copies_files"] is True
+assert report["safety"]["writes_config"] is True
+assert report["safety"]["writes_config_to_fake_root_only"] is True
+assert report["safety"]["runs_services"] is False
+assert report["safety"]["starts_router_services"] is False
+assert report["safety"]["restarts_network"] is False
+assert report["safety"]["touches_network_runtime"] is False
+assert report["safety"]["touches_firewall_runtime"] is False
+assert report["safety"]["touches_dns_runtime"] is False
+assert report["safety"]["touches_dhcp_runtime"] is False
+assert report["safety"]["touches_cake_runtime"] is False
+assert report["safety"]["cancels_live_rollback"] is False
+assert report["safety"]["simulates_rollback_cancel"] is True
+assert report["summary"]["command_count"] == 8
+assert report["summary"]["completed_command_count"] == 8
+assert report["summary"]["successful_command_count"] == 8
+assert report["summary"]["failed_command_count"] == 0
+assert report["summary"]["stopped_early"] is False
+assert report["summary"]["final_summary_ok"] is True
+assert report["summary"]["deployment_chain_simulated_complete"] is True
+assert report["summary"]["ready_for_live_orchestrator"] is True
+assert report["summary"]["ready_for_live_apply"] is False
+assert report["summary"]["safe_to_apply_live"] is False
+assert report["summary"]["next_gate"] == "live-orchestrator-operator-approval"
+assert report["final_summary"]["ok"] is True
+PYJSON
+
 echo "Smoke test passed."
