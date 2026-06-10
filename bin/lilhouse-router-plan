@@ -155,6 +155,20 @@ plan = {
             "intent": "Configure DHCP service for LAN clients if requested.",
             "risk": "medium",
             "apply_status": "not_implemented",
+            "planned_files": [
+                "/etc/pihole/pihole.toml"
+            ],
+            "planned_settings": {
+                "provider": "pihole-FTL",
+                "interface": args.lan,
+                "subnet": str(subnet) if subnet is not None else args.subnet,
+                "router_ip": args.lan_ip,
+                "dhcp_start": args.dhcp_start,
+                "dhcp_end": args.dhcp_end,
+                "enabled": bool(args.dhcp_start and args.dhcp_end),
+                "authoritative": True,
+                "comment": "DHCP blueprint only. No Pi-hole DHCP settings are written by this command."
+            },
         },
         {
             "name": "worker_timers",
