@@ -25,6 +25,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-wizard"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-preview-validate"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-dry-run"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-create"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -202,6 +203,24 @@ python3 -m json.tool "$TMP_STATE/router-backup-dry-run.json" >/dev/null
 grep -q '"schema": "lilhouse.router_backup_dry_run.v1"' "$TMP_STATE/router-backup-dry-run.json"
 grep -q '"copies_files": false' "$TMP_STATE/router-backup-dry-run.json"
 grep -q '"/etc/systemd/system/lilhouse-current-state.service"' "$TMP_STATE/router-backup-dry-run.json"
+
+mkdir -p "$TMP_ROOT/etc/pihole" "$TMP_ROOT/etc/systemd/system" "$TMP_ROOT/etc/sysctl.d"
+echo "# smoke nftables" > "$TMP_ROOT/etc/nftables.conf"
+echo "net.ipv4.ip_forward=1" > "$TMP_ROOT/etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+echo "# smoke pihole" > "$TMP_ROOT/etc/pihole/test.conf"
+echo "# smoke current-state service" > "$TMP_ROOT/etc/systemd/system/lilhouse-current-state.service"
+
+BACKUP_OUT="$TMP_STATE/router-backup-create"
+"$REPO_DIR/bin/lilhouse-router-backup-create"   --root "$TMP_ROOT"   --backup-dir "$BACKUP_OUT"   --yes >"$TMP_STATE/router-backup-create.json"
+
+python3 -m json.tool "$TMP_STATE/router-backup-create.json" >/dev/null
+test -f "$BACKUP_OUT/backup-report.json"
+test -f "$BACKUP_OUT/etc/nftables.conf"
+test -f "$BACKUP_OUT/etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+test -f "$BACKUP_OUT/etc/pihole/test.conf"
+grep -q '"schema": "lilhouse.router_backup_create.v1"' "$TMP_STATE/router-backup-create.json"
+grep -q '"apply": true' "$TMP_STATE/router-backup-create.json"
+grep -q '"file_copied"' "$TMP_STATE/router-backup-create.json"
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
 "$REPO_DIR/bin/lilhouse-router-wizard" \

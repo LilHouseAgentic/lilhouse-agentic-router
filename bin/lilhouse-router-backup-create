@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+import argparse
+import hashlib
+import json
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def rooted(root: Path, absolute_path: str) -> Path:
+    return root / absolute_path.lstrip("/")
+
+
+def copy_path(source: Path, target: Path) -> str:
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    if source.is_file():
+        shutil.copy2(source, target)
+        return "file_copied"
+
+    if source.is_dir():
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(source, target, symlinks=True)
+        return "directory_copied"
+
+    return "skipped"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Create a router deploy backup from a root filesystem."
+    )
+    parser.add_argument("--root", default="/", help="Root filesystem to back up from.")
+    parser.add_argument(
+        "--backup-dir",
+        required=True,
+        help="Backup destination directory. It will be created if needed.",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Required confirmation flag. Without this, no files are copied.",
+    )
+    args = parser.parse_args()
+
+    root = Path(args.root).resolve()
+    backup_dir = Path(args.backup_dir).resolve()
+
+    if not args.yes:
+        print("ERROR: refusing to copy files without --yes", file=sys.stderr)
+        return 2
+
+    if not root.exists():
+        print(f"ERROR: root does not exist: {root}", file=sys.stderr)
+        return 1
+
+    plan_cmd = Path(__file__).with_name("lilhouse-router-backup-plan")
+    if not plan_cmd.exists():
+        print(f"ERROR: backup plan command not found: {plan_cmd}", file=sys.stderr)
+        return 1
+
+    plan = json.loads(subprocess.check_output([str(plan_cmd)], text=True))
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    entries = []
+    for item in plan["backup_paths"]:
+        source_path = item["path"]
+        source = rooted(root, source_path)
+        target = backup_dir / source_path.lstrip("/")
+
+        exists = source.exists()
+        before_sha256 = sha256_file(source) if source.is_file() else None
+
+        if exists:
+            action = copy_path(source, target)
+        else:
+            action = "missing"
+
+        after_exists = target.exists()
+        after_sha256 = sha256_file(target) if target.is_file() else None
+
+        entries.append(
+            {
+                "path": source_path,
+                "rooted_source": str(source),
+                "backup_target": str(target),
+                "planned_type": item["type"],
+                "exists": exists,
+                "action": action,
+                "source_sha256": before_sha256,
+                "backup_sha256": after_sha256,
+                "backup_exists": after_exists,
+                "reason": item["reason"],
+            }
+        )
+
+    report = {
+        "schema": "lilhouse.router_backup_create.v1",
+        "mode": "backup-create",
+        "apply": True,
+        "root": str(root),
+        "backup_dir": str(backup_dir),
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "entries": entries,
+        "summary": {
+            "total": len(entries),
+            "copied": sum(1 for e in entries if e["action"] in ("file_copied", "directory_copied")),
+            "missing": sum(1 for e in entries if e["action"] == "missing"),
+        },
+    }
+
+    report_path = backup_dir / "backup-report.json"
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
