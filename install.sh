@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 DESTDIR=""
 ENABLE_SYSTEMD=1
 MODE="observe-only"
 WIZARD=0
 DRY_RUN=0
+ROUTER_WIZARD_OUT_DIR=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -41,6 +44,14 @@ while [ "$#" -gt 0 ]; do
       fi
       shift 2
       ;;
+    --out-dir)
+      ROUTER_WIZARD_OUT_DIR="${2:-}"
+      if [ -z "$ROUTER_WIZARD_OUT_DIR" ]; then
+        echo "Missing value for --out-dir"
+        exit 1
+      fi
+      shift 2
+      ;;
     --no-systemd)
       ENABLE_SYSTEMD=0
       shift
@@ -51,6 +62,7 @@ while [ "$#" -gt 0 ]; do
       echo "  --mode MODE      Deployment mode: observe-only or router-deploy."
       echo "  --wizard         Future router deployment wizard flag."
       echo "  --dry-run        Show intent without applying router-deploy changes."
+      echo "  --out-dir PATH   Output directory for router-deploy dry-run wizard plans."
       echo "  --destdir PATH   Install into a fake root for testing."
       echo "  --no-systemd     Copy files but do not enable/start systemd timer."
       exit 0
@@ -63,19 +75,33 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ "$MODE" = "router-deploy" ]; then
-  echo "Router-deploy mode is planned but not implemented yet."
+  if [ "$WIZARD" -eq 1 ] && [ "$DRY_RUN" -eq 1 ]; then
+    OUT="${ROUTER_WIZARD_OUT_DIR:-${LILHOUSE_STATE_DIR:-./state}/router-wizard-dry-run}"
+    echo "Router-deploy dry-run wizard requested."
+    echo
+    echo "No system changes will be made."
+    echo
+    "$REPO_DIR/bin/lilhouse-router-wizard" --out-dir "$OUT"
+    exit $?
+  fi
+
+  echo "Router-deploy apply mode is planned but not implemented yet."
   echo
   echo "This future mode will configure WAN/LAN, forwarding, firewall/NAT, DHCP, Pi-hole, Unbound, CAKE/SQM, and worker timers."
-  echo "For now, use observe-only mode:"
+  echo "For now, use the dry-run wizard:"
   echo
-  echo "  sudo ./install.sh --mode observe-only"
+  echo "  ./install.sh --mode router-deploy --wizard --dry-run"
   echo
   echo "No changes made."
   exit 2
 fi
 
 if [ "$WIZARD" -eq 1 ]; then
-  echo "--wizard is reserved for future router-deploy mode."
+  echo "--wizard is only supported with router-deploy dry-run for now."
+  echo
+  echo "Try:"
+  echo "  ./install.sh --mode router-deploy --wizard --dry-run"
+  echo
   echo "No changes made."
   exit 2
 fi
@@ -96,7 +122,6 @@ if [ -z "$DESTDIR" ] && [ "${EUID:-$(id -u)}" -ne 0 ]; then
   exit 1
 fi
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
 root_path() {
