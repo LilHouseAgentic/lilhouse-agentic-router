@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def load_json(path: Path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Plan future router service activation order. Writes nothing."
+    )
+    parser.add_argument("apply_plan", help="router apply-plan JSON.")
+    parser.add_argument("--rollback-rehearsal-report", required=True)
+    parser.add_argument("--health-rehearsal-report", required=True)
+    args = parser.parse_args()
+
+    apply_plan_path = Path(args.apply_plan).resolve()
+    rollback_path = Path(args.rollback_rehearsal_report).resolve()
+    health_path = Path(args.health_rehearsal_report).resolve()
+
+    for label, path in {
+        "apply_plan": apply_plan_path,
+        "rollback_rehearsal_report": rollback_path,
+        "health_rehearsal_report": health_path,
+    }.items():
+        if not path.is_file():
+            print(f"ERROR: {label} not found: {path}", file=sys.stderr)
+            return 1
+
+    apply_plan = load_json(apply_plan_path)
+    rollback = load_json(rollback_path)
+    health = load_json(health_path)
+
+    checks = []
+
+    def check(name, ok, detail):
+        checks.append({"name": name, "ok": bool(ok), "detail": detail})
+
+    check(
+        "apply_plan_schema",
+        apply_plan.get("schema") == "lilhouse.router_apply_plan.v1",
+        "input must be router apply-plan",
+    )
+    check("apply_plan_ok", apply_plan.get("ok") is True, "apply plan must be OK")
+    check("apply_plan_non_live", apply_plan.get("apply") is False and apply_plan.get("live_changes") is False, "apply plan must be non-live")
+
+    check(
+        "rollback_rehearsal_schema",
+        rollback.get("schema") == "lilhouse.router_timed_rollback_rehearsal.v1",
+        "rollback rehearsal schema must match",
+    )
+    check("rollback_rehearsal_ok", rollback.get("ok") is True, "rollback rehearsal must be OK")
+    check(
+        "rollback_units_validated",
+        rollback.get("summary", {}).get("rollback_units_validated") is True,
+        "rollback units must validate",
+    )
+
+    check(
+        "health_rehearsal_schema",
+        health.get("schema") == "lilhouse.router_post_apply_health_rehearsal.v1",
+        "health rehearsal schema must match",
+    )
+    check("health_rehearsal_ok", health.get("ok") is True, "health rehearsal must be OK")
+    check(
+        "health_failure_blocks_cancel",
+        health.get("summary", {}).get("failure_blocks_rollback_cancel") is True,
+        "health rehearsal must prove failure blocks rollback cancellation",
+    )
+
+    steps = [
+        {
+            "order": 10,
+            "id": "daemon_reload_before_enable",
+            "command": "systemctl daemon-reload",
+            "apply_now": False,
+            "reason": "Load staged unit files before activation.",
+        },
+        {
+            "order": 20,
+            "id": "arm_rollback_timer",
+            "command": "systemctl enable --now lilhouse-router-rollback-guard.timer",
+            "apply_now": False,
+            "reason": "Rollback timer must be armed before network/firewall activation.",
+        },
+        {
+            "order": 30,
+            "id": "apply_forwarding_sysctl",
+            "command": "sysctl --system",
+            "apply_now": False,
+            "reason": "Apply forwarding settings only after rollback is armed.",
+        },
+        {
+            "order": 40,
+            "id": "activate_firewall",
+            "command": "systemctl enable --now nftables",
+            "apply_now": False,
+            "reason": "Activate firewall after rollback guard is armed.",
+        },
+        {
+            "order": 50,
+            "id": "activate_networkd",
+            "command": "systemctl enable --now systemd-networkd",
+            "apply_now": False,
+            "reason": "Activate LAN networking after firewall and rollback guard are prepared.",
+        },
+        {
+            "order": 60,
+            "id": "activate_lilhouse_timers",
+            "commands": [
+                "systemctl enable --now lilhouse-current-state.timer",
+                "systemctl enable --now lilhouse-storage-health.timer"
+            ],
+            "apply_now": False,
+            "reason": "Start observe timers after base network services.",
+        },
+        {
+            "order": 70,
+            "id": "run_post_apply_health",
+            "command": "lilhouse-router-post-apply-health-run",
+            "apply_now": False,
+            "reason": "Future live executor must prove post-apply health before cancelling rollback.",
+        },
+        {
+            "order": 80,
+            "id": "cancel_rollback_only_after_health_pass",
+            "command": "systemctl disable --now lilhouse-router-rollback-guard.timer",
+            "apply_now": False,
+            "reason": "Rollback timer may only be cancelled after every required health check passes.",
+        },
+    ]
+
+    ok = all(c["ok"] for c in checks)
+
+    result = {
+        "schema": "lilhouse.router_service_activation_plan.v1",
+        "mode": "service-activation-plan",
+        "apply": False,
+        "live_changes": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "ok": ok,
+        "checks": checks,
+        "apply_plan": str(apply_plan_path),
+        "rollback_rehearsal_report": str(rollback_path),
+        "health_rehearsal_report": str(health_path),
+        "steps": steps,
+        "summary": {
+            "checks_passed": sum(1 for c in checks if c["ok"]),
+            "checks_total": len(checks),
+            "step_count": len(steps),
+            "rollback_armed_before_network_changes": True,
+            "rollback_cancel_after_health_only": True,
+            "safe_to_apply_live": False,
+        },
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
