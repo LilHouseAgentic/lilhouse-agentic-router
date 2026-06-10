@@ -410,6 +410,41 @@ MANIFEST_FILE="$PREVIEW_ROOT/MANIFEST.txt"
   find "$PREVIEW_ROOT" -type f | sed "s#^$PREVIEW_ROOT/##" | sort | sed "s#^#- #"
 } >"$MANIFEST_FILE"
 
+ROLLBACK_FILE="$PREVIEW_ROOT/ROLLBACK-NOTES.txt"
+
+cat >"$ROLLBACK_FILE" <<EOF
+LilHouse router deploy rollback preview
+
+This file is generated for planning only.
+No rollback action has been performed.
+
+Future apply mode must back up these live paths before writing anything:
+
+- /etc/systemd/network/20-lilhouse-lan.network
+- /etc/sysctl.d/90-lilhouse-router-forwarding.conf
+- /etc/nftables.conf
+- /etc/lilhouse/cake.env
+- /etc/pihole
+- /etc/unbound/unbound.conf.d/lilhouse.conf
+- /etc/systemd/system/lilhouse-current-state.service
+- /etc/systemd/system/lilhouse-current-state.timer
+- /etc/systemd/system/lilhouse-storage-health.service
+- /etc/systemd/system/lilhouse-storage-health.timer
+
+Future rollback mode must be able to:
+
+1. Stop newly enabled LilHouse timers/services.
+2. Restore backed-up files exactly.
+3. Reload systemd.
+4. Reload sysctl only after config restore.
+5. Restore firewall rules from backup before applying any new rules.
+6. Restart DNS/DHCP services only after their configs are restored.
+7. Leave a timestamped rollback report.
+
+Live router safety rule:
+Do not enable apply mode until backup, validation, and rollback have their own smoke-tested path.
+EOF
+
 echo "LilHouse router wizard plan generated."
 echo
 echo "No system changes were made."
