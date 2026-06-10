@@ -1,0 +1,11 @@
+[Unit]
+Description=LilHouse status summary
+Documentation=https://github.com/YOURNAME/lilhouse-agentic-router
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/lilhouse/lilhouse.env
+Environment=LILHOUSE_COMMON=/usr/lib/lilhouse/lilhouse-common.sh
+ExecStart=/usr/local/bin/lilhouse-status
+User=root
+Group=root

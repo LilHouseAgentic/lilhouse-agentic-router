@@ -1,0 +1,11 @@
+[Unit]
+Description=Run LilHouse current state collector every minute
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=10s
+Unit=lilhouse-current-state.service
+
+[Install]
+WantedBy=timers.target
