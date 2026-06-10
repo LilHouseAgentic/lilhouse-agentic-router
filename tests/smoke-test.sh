@@ -39,6 +39,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-apply-create"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-apply-validate"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-full-dress-rehearsal"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-readiness"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-timed-rollback-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -475,6 +476,28 @@ assert data["ready_for_live_apply"] is False
 assert data["summary"]["non_live_pipeline_proven"] is True
 assert data["summary"]["critical_blocker_count"] >= 1
 assert data["summary"]["safe_to_apply_live"] is False
+PYJSON
+
+"$REPO_DIR/bin/lilhouse-router-timed-rollback-plan" \
+  --backup-dir "$DRESS_OUT/preflight/backup" \
+  --rollback-root / \
+  --timeout-minutes 5 >"$TMP_STATE/router-timed-rollback-plan.json"
+
+python3 -m json.tool "$TMP_STATE/router-timed-rollback-plan.json" >/dev/null
+
+python3 - "$TMP_STATE/router-timed-rollback-plan.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_timed_rollback_plan.v1"
+assert data["apply"] is False
+assert data["live_changes"] is False
+assert data["writes_files"] is False
+assert data["ok"] is True
+assert data["summary"]["requires_verified_backup"] is True
+assert data["summary"]["requires_timer_arm_before_live_changes"] is True
+assert data["summary"]["requires_health_check_cancel"] is True
+assert data["summary"]["safe_to_apply_live"] is False
+assert data["timeout_minutes"] == 5
 PYJSON
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"

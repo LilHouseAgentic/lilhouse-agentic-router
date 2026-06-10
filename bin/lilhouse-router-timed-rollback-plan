@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Plan a timed rollback guard for future LilHouse router live apply. Writes nothing."
+    )
+    parser.add_argument("--backup-dir", required=True, help="Verified router backup directory.")
+    parser.add_argument("--rollback-root", default="/", help="Future rollback target root. Planning only.")
+    parser.add_argument("--timeout-minutes", type=int, default=5, help="Rollback delay window.")
+    args = parser.parse_args()
+
+    backup_dir = Path(args.backup_dir).resolve()
+    rollback_root = Path(args.rollback_root).resolve()
+
+    errors = []
+
+    if args.timeout_minutes < 1 or args.timeout_minutes > 60:
+        errors.append("timeout-minutes must be between 1 and 60")
+
+    backup_report = backup_dir / "backup-report.json"
+    if not backup_report.is_file():
+        errors.append(f"backup-report.json not found under backup-dir: {backup_dir}")
+
+    service_name = "lilhouse-router-rollback-guard.service"
+    timer_name = "lilhouse-router-rollback-guard.timer"
+
+    service_plan = {
+        "unit_name": service_name,
+        "description": "LilHouse router timed rollback guard",
+        "type": "oneshot",
+        "tool": "lilhouse-router-restore-create",
+        "arguments": {
+            "backup_dir": str(backup_dir),
+            "root": str(rollback_root),
+            "confirmation_required": True,
+        },
+        "purpose": "Restore the verified pre-apply backup if post-apply health checks do not cancel the timer.",
+    }
+
+    timer_plan = {
+        "unit_name": timer_name,
+        "description": "LilHouse router timed rollback guard timer",
+        "on_active_sec": f"{args.timeout_minutes}min",
+        "unit": service_name,
+        "persistent": False,
+        "purpose": "Give the apply process a short window to prove health before automatic rollback.",
+    }
+
+    result = {
+        "schema": "lilhouse.router_timed_rollback_plan.v1",
+        "mode": "timed-rollback-plan",
+        "apply": False,
+        "live_changes": False,
+        "writes_files": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "ok": not errors,
+        "error_count": len(errors),
+        "errors": errors,
+        "backup_dir": str(backup_dir),
+        "backup_report": str(backup_report),
+        "rollback_root": str(rollback_root),
+        "timeout_minutes": args.timeout_minutes,
+        "service_plan": service_plan,
+        "timer_plan": timer_plan,
+        "summary": {
+            "requires_verified_backup": True,
+            "requires_timer_arm_before_live_changes": True,
+            "requires_health_check_cancel": True,
+            "safe_to_apply_live": False,
+        },
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
