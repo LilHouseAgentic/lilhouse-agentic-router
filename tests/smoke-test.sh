@@ -1662,4 +1662,55 @@ assert report["summary"]["safe_to_apply_live"] is False
 assert report["summary"]["next_gate"] == "rollback-cancel"
 PYJSON
 
+
+echo
+echo "== run rollback cancel command in simulated mode =="
+
+ROLLBACK_CANCEL_JSON="$TMP_STATE/rollback-cancel.json"
+
+set +e
+"$REPO_DIR/bin/lilhouse-router-rollback-cancel" \
+  --post-apply-health-report "$POST_APPLY_HEALTH_JSON" \
+  --target-root "$ROLLBACK_GUARD_ROOT" >"$TMP_STATE/rollback-cancel-refusal.json"
+ROLLBACK_CANCEL_REFUSAL_RC=$?
+set -e
+test "$ROLLBACK_CANCEL_REFUSAL_RC" -eq 2
+
+"$REPO_DIR/bin/lilhouse-router-rollback-cancel" \
+  --post-apply-health-report "$POST_APPLY_HEALTH_JSON" \
+  --target-root "$ROLLBACK_GUARD_ROOT" \
+  --yes \
+  --simulate \
+  --out "$ROLLBACK_CANCEL_JSON" >"$TMP_STATE/rollback-cancel.out"
+
+python3 - "$ROLLBACK_CANCEL_JSON" <<'PYJSON'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text())
+assert report["schema"] == "lilhouse.router_rollback_cancel.v1"
+assert report["ok"] is True
+assert report["safety"]["apply"] is False
+assert report["safety"]["live_changes"] is False
+assert report["safety"]["copies_files"] is False
+assert report["safety"]["writes_config"] is False
+assert report["safety"]["runs_services"] is False
+assert report["safety"]["starts_router_services"] is False
+assert report["safety"]["restarts_network"] is False
+assert report["safety"]["touches_network_runtime"] is False
+assert report["safety"]["touches_firewall_runtime"] is False
+assert report["safety"]["touches_dns_runtime"] is False
+assert report["safety"]["touches_dhcp_runtime"] is False
+assert report["safety"]["touches_cake_runtime"] is False
+assert report["safety"]["cancels_rollback"] is False
+assert report["safety"]["simulates_rollback_cancel"] is True
+assert report["summary"]["rollback_cancelled"] is True
+assert report["summary"]["router_live_apply_complete"] is True
+assert report["summary"]["safe_to_leave_live_state"] is True
+assert report["summary"]["ready_for_live_apply"] is False
+assert report["summary"]["safe_to_apply_live"] is False
+assert report["summary"]["next_gate"] == "final-summary"
+PYJSON
+
 echo "Smoke test passed."

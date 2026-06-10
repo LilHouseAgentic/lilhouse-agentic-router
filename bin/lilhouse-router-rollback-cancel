@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+TIMER_NAME = "lilhouse-router-rollback.timer"
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def load_json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception as e:
+        raise SystemExit(f"failed to read JSON {path}: {e}")
+
+
+def run_cmd(argv):
+    exe = shutil.which(argv[0])
+    if not exe:
+        return {
+            "argv": argv,
+            "available": False,
+            "returncode": None,
+            "stdout": "",
+            "stderr": f"{argv[0]} not found",
+            "ok": False,
+        }
+
+    p = subprocess.run(
+        [exe, *argv[1:]],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    return {
+        "argv": argv,
+        "available": True,
+        "returncode": p.returncode,
+        "stdout": p.stdout.strip(),
+        "stderr": p.stderr.strip(),
+        "ok": p.returncode == 0,
+    }
+
+
+def unit_path(root, unit_name):
+    return root / "etc/systemd/system" / unit_name
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Cancel the rollback timer after post-apply health passes.")
+    ap.add_argument("--post-apply-health-report", required=True)
+    ap.add_argument("--target-root", default="/")
+    ap.add_argument("--yes", action="store_true", help="Required to cancel rollback.")
+    ap.add_argument("--allow-live-root", action="store_true", help="Required when --target-root /.")
+    ap.add_argument("--simulate", action="store_true", help="Do not call systemctl; simulate rollback cancellation.")
+    ap.add_argument("--out", default="")
+    args = ap.parse_args()
+
+    target_root = Path(args.target_root).resolve()
+
+    if not args.yes:
+        print("ERROR: refusing to cancel rollback without --yes", file=sys.stderr)
+        return 2
+
+    if target_root == Path("/") and not args.allow_live_root:
+        print("ERROR: refusing to cancel rollback on live / without --allow-live-root", file=sys.stderr)
+        return 2
+
+    health = load_json(args.post_apply_health_report)
+
+    if health.get("schema") != "lilhouse.router_post_apply_health.v1":
+        print("ERROR: post-apply health report schema mismatch", file=sys.stderr)
+        return 2
+
+    if health.get("ok") is not True:
+        print("ERROR: post-apply health report is not OK", file=sys.stderr)
+        return 2
+
+    if health.get("summary", {}).get("ready_for_rollback_cancel") is not True:
+        print("ERROR: post-apply health did not approve rollback cancellation", file=sys.stderr)
+        return 2
+
+    if health.get("summary", {}).get("rollback_timer_still_armed") is not True:
+        print("ERROR: rollback timer was not confirmed armed before cancellation", file=sys.stderr)
+        return 2
+
+    timer = unit_path(target_root, TIMER_NAME)
+
+    if target_root != Path("/") and not timer.exists():
+        print(f"ERROR: missing rollback timer unit in target root: {timer}", file=sys.stderr)
+        return 2
+
+    live_mode = target_root == Path("/") and not args.simulate
+
+    if live_mode:
+        commands = [run_cmd(["systemctl", "disable", "--now", TIMER_NAME])]
+        rollback_cancelled = all(c["ok"] for c in commands)
+    else:
+        commands = [{
+            "argv": ["systemctl", "disable", "--now", TIMER_NAME],
+            "available": shutil.which("systemctl") is not None,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "",
+            "ok": True,
+            "simulated": True,
+        }]
+        rollback_cancelled = True
+
+    report = {
+        "schema": "lilhouse.router_rollback_cancel.v1",
+        "ok": rollback_cancelled,
+        "generated_at": now_iso(),
+        "mode": "rollback-cancel-live" if live_mode else "rollback-cancel-simulated",
+        "inputs": {
+            "post_apply_health_report": str(Path(args.post_apply_health_report)),
+            "target_root": str(target_root),
+            "allow_live_root": args.allow_live_root,
+            "yes": args.yes,
+            "simulate": args.simulate,
+        },
+        "safety": {
+            "apply": False,
+            "live_changes": live_mode,
+            "copies_files": False,
+            "writes_config": False,
+            "runs_services": live_mode,
+            "starts_router_services": False,
+            "restarts_network": False,
+            "touches_network_runtime": False,
+            "touches_firewall_runtime": False,
+            "touches_dns_runtime": False,
+            "touches_dhcp_runtime": False,
+            "touches_cake_runtime": False,
+            "cancels_rollback": live_mode,
+            "simulates_rollback_cancel": not live_mode,
+        },
+        "summary": {
+            "rollback_timer": TIMER_NAME,
+            "rollback_cancelled": rollback_cancelled,
+            "router_live_apply_complete": rollback_cancelled,
+            "safe_to_leave_live_state": rollback_cancelled,
+            "ready_for_live_apply": False,
+            "safe_to_apply_live": False,
+            "next_gate": "final-summary",
+        },
+        "commands": commands,
+    }
+
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["ok"] else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
