@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "== LilHouse repo audit =="
+
+FAIL=0
+
+COMMON_EXCLUDES=(
+  --exclude-dir=.git
+  --exclude-dir=import-review
+  --exclude-dir=state-test
+  --exclude-dir=runtime-test
+  --exclude-dir=logs-test
+  --exclude-dir=repo-staging
+  --exclude='.env.example'
+  --exclude='.gitignore'
+  --exclude='audit-secrets.sh'
+  --exclude='*.md'
+)
+
+echo
+echo "== check for likely secrets =="
+if grep -RniE \
+  'api_key|token|secret|password|pushover|openai|bearer|authorization|icloud|gmail|webhook|private_key' \
+  . \
+  "${COMMON_EXCLUDES[@]}"
+then
+  FAIL=1
+else
+  echo "none found"
+fi
+
+echo
+echo "== check for local/private machine paths and identifiers =="
+if grep -RniE \
+  '2406:|fd[0-9a-f]|/mnt/das|/srv/starlink-health|/srv/lilhouse-autonomy|/home/pi|/home/pi5|raspberrypi|Gremlin|Maleny|Jordy|jortay|icloud' \
+  . \
+  "${COMMON_EXCLUDES[@]}"
+then
+  FAIL=1
+else
+  echo "none found"
+fi
+
+echo
+echo "== check for risky command patterns =="
+if grep -RniE \
+  'mkfs|dd |reboot|shutdown|iptables|nft |apt |curl .*sh|wget .*sh|eval ' \
+  . \
+  "${COMMON_EXCLUDES[@]}"
+then
+  FAIL=1
+else
+  echo "none found"
+fi
+
+echo
+echo "== check for unexpected rm -rf =="
+if grep -RniE 'rm -rf' . \
+  --exclude-dir=.git \
+  --exclude-dir=import-review \
+  --exclude='audit-secrets.sh' \
+  --exclude='smoke-test.sh'
+then
+  FAIL=1
+else
+  echo "none found"
+fi
+
+echo
+if [ "$FAIL" -eq 0 ]; then
+  echo "Audit passed."
+else
+  echo "Audit found items to review."
+  exit 1
+fi
