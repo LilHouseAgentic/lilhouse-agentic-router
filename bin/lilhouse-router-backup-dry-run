@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+import argparse
+import hashlib
+import json
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def rooted(root: Path, absolute_path: str) -> Path:
+    rel = absolute_path.lstrip("/")
+    return root / rel
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Generate a router deploy backup dry-run report. No files are copied."
+    )
+    parser.add_argument("--root", default="/", help="Root filesystem to inspect, default: /")
+    parser.add_argument(
+        "--backup-dir",
+        default="/var/backups/lilhouse/router-deploy/PREVIEW",
+        help="Backup target directory to describe, not create.",
+    )
+    args = parser.parse_args()
+
+    root = Path(args.root).resolve()
+    backup_dir = Path(args.backup_dir)
+
+    plan_cmd = Path(__file__).with_name("lilhouse-router-backup-plan")
+    if not plan_cmd.exists():
+        print(f"ERROR: backup plan command not found: {plan_cmd}", file=sys.stderr)
+        return 1
+
+    plan = json.loads(subprocess.check_output([str(plan_cmd)], text=True))
+
+    entries = []
+    for item in plan["backup_paths"]:
+        source_path = item["path"]
+        source = rooted(root, source_path)
+        exists = source.exists()
+
+        if source.is_file():
+            actual_type = "file"
+            digest = sha256_file(source)
+        elif source.is_dir():
+            actual_type = "directory"
+            digest = None
+        elif exists:
+            actual_type = "other"
+            digest = None
+        else:
+            actual_type = "missing"
+            digest = None
+
+        entries.append(
+            {
+                "path": source_path,
+                "rooted_source": str(source),
+                "planned_type": item["type"],
+                "actual_type": actual_type,
+                "exists": exists,
+                "sha256": digest,
+                "backup_target": str(backup_dir / source_path.lstrip("/")),
+                "reason": item["reason"],
+            }
+        )
+
+    report = {
+        "schema": "lilhouse.router_backup_dry_run.v1",
+        "mode": "dry-run",
+        "apply": False,
+        "copies_files": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "root": str(root),
+        "backup_dir": str(backup_dir),
+        "entries": entries,
+        "summary": {
+            "total": len(entries),
+            "existing": sum(1 for e in entries if e["exists"]),
+            "missing": sum(1 for e in entries if not e["exists"]),
+        },
+    }
+
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

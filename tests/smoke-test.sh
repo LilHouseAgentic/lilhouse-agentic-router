@@ -24,6 +24,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-plan-summary"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-wizard"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-preview-validate"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-plan"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -195,6 +196,12 @@ grep -q '"schema": "lilhouse.router_backup_plan.v1"' "$TMP_STATE/router-backup-p
 grep -q '"apply": false' "$TMP_STATE/router-backup-plan.json"
 grep -q '"/etc/nftables.conf"' "$TMP_STATE/router-backup-plan.json"
 grep -q '"/etc/pihole"' "$TMP_STATE/router-backup-plan.json"
+
+"$REPO_DIR/bin/lilhouse-router-backup-dry-run" --root "$TMP_ROOT" >"$TMP_STATE/router-backup-dry-run.json"
+python3 -m json.tool "$TMP_STATE/router-backup-dry-run.json" >/dev/null
+grep -q '"schema": "lilhouse.router_backup_dry_run.v1"' "$TMP_STATE/router-backup-dry-run.json"
+grep -q '"copies_files": false' "$TMP_STATE/router-backup-dry-run.json"
+grep -q '"/etc/systemd/system/lilhouse-current-state.service"' "$TMP_STATE/router-backup-dry-run.json"
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
 "$REPO_DIR/bin/lilhouse-router-wizard" \
