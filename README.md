@@ -63,3 +63,25 @@ This is not designed to blindly apply AI-generated commands.
 ## License
 
 MIT
+
+## Router deployment dry-run wizard
+
+Router deployment is planned, but apply mode is intentionally blocked for now.
+
+A safe dry-run wizard is available:
+
+    ./install.sh --mode router-deploy --wizard --dry-run
+
+This command does not change the system.
+
+It generates:
+
+- an interface report
+- a router deployment JSON plan
+- a human-readable plan summary
+
+To choose the output location:
+
+    ./install.sh --mode router-deploy --wizard --dry-run --out-dir /tmp/lilhouse-router-plan
+
+Real router deployment will be added in stages behind explicit confirmation, backups, validation, and rollback support.
