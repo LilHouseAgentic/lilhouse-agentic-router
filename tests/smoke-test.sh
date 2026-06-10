@@ -1344,4 +1344,67 @@ assert report["summary"]["safe_to_apply_live"] is False
 assert report["summary"]["next_gate"] == "live-backup"
 PYJSON
 
+
+echo
+echo "== run live backup command against fake root =="
+
+LIVE_BACKUP_ROOT="$TMP_STATE/live-backup-root"
+LIVE_BACKUP_DIR="$TMP_STATE/live-backup-dir"
+mkdir -p "$LIVE_BACKUP_ROOT/etc/systemd/network"
+mkdir -p "$LIVE_BACKUP_ROOT/etc/sysctl.d"
+mkdir -p "$LIVE_BACKUP_ROOT/etc/lilhouse"
+mkdir -p "$LIVE_BACKUP_ROOT/etc/pihole"
+mkdir -p "$LIVE_BACKUP_ROOT/etc/unbound/unbound.conf.d"
+
+echo "# fake live lan" > "$LIVE_BACKUP_ROOT/etc/systemd/network/20-lilhouse-lan.network"
+echo "net.ipv4.ip_forward=1" > "$LIVE_BACKUP_ROOT/etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+echo "# fake nft" > "$LIVE_BACKUP_ROOT/etc/nftables.conf"
+echo "# fake env" > "$LIVE_BACKUP_ROOT/etc/lilhouse/lilhouse.env"
+echo "# fake pihole" > "$LIVE_BACKUP_ROOT/etc/pihole/test.conf"
+echo "# fake unbound" > "$LIVE_BACKUP_ROOT/etc/unbound/unbound.conf.d/lilhouse.conf"
+
+set +e
+"$REPO_DIR/bin/lilhouse-router-live-backup" \
+  --preflight-report "$LIVE_PREFLIGHT_JSON" \
+  --backup-dir "$LIVE_BACKUP_DIR" \
+  --root "$LIVE_BACKUP_ROOT" >"$TMP_STATE/live-backup-refusal.json"
+LIVE_BACKUP_REFUSAL_RC=$?
+set -e
+test "$LIVE_BACKUP_REFUSAL_RC" -eq 2
+
+"$REPO_DIR/bin/lilhouse-router-live-backup" \
+  --preflight-report "$LIVE_PREFLIGHT_JSON" \
+  --backup-dir "$LIVE_BACKUP_DIR" \
+  --root "$LIVE_BACKUP_ROOT" \
+  --yes >"$TMP_STATE/live-backup.json"
+
+test -f "$LIVE_BACKUP_DIR/live-backup-report.json"
+test -f "$LIVE_BACKUP_DIR/etc/nftables.conf"
+test -f "$LIVE_BACKUP_DIR/etc/systemd/network/20-lilhouse-lan.network"
+test -f "$LIVE_BACKUP_DIR/etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+test -f "$LIVE_BACKUP_DIR/etc/lilhouse/lilhouse.env"
+test -f "$LIVE_BACKUP_DIR/etc/pihole/test.conf"
+test -f "$LIVE_BACKUP_DIR/etc/unbound/unbound.conf.d/lilhouse.conf"
+
+python3 - "$LIVE_BACKUP_DIR/live-backup-report.json" <<'PYJSON'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text())
+assert report["schema"] == "lilhouse.router_live_backup.v1"
+assert report["ok"] is True
+assert report["safety"]["apply"] is False
+assert report["safety"]["live_changes"] is False
+assert report["safety"]["copies_files"] is True
+assert report["safety"]["copies_into_backup_only"] is True
+assert report["safety"]["modifies_source_root"] is False
+assert report["safety"]["runs_services"] is False
+assert report["safety"]["writes_config"] is False
+assert report["summary"]["ready_for_rollback_arm"] is True
+assert report["summary"]["ready_for_live_apply"] is False
+assert report["summary"]["safe_to_apply_live"] is False
+assert report["summary"]["next_gate"] == "rollback-arm"
+PYJSON
+
 echo "Smoke test passed."

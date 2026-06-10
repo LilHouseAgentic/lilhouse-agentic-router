@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+import argparse
+import hashlib
+import json
+import shutil
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+BACKUP_PATHS = [
+    "/etc/systemd/network",
+    "/etc/sysctl.d",
+    "/etc/nftables.conf",
+    "/etc/lilhouse",
+    "/etc/pihole",
+    "/etc/unbound",
+    "/etc/systemd/system/lilhouse-current-state.service",
+    "/etc/systemd/system/lilhouse-current-state.timer",
+    "/etc/systemd/system/lilhouse-storage-health.service",
+    "/etc/systemd/system/lilhouse-storage-health.timer",
+]
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with Path(path).open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def load_json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception as e:
+        raise SystemExit(f"failed to read JSON {path}: {e}")
+
+
+def copy_item(src, root, backup_dir):
+    src_path = (root / src.lstrip("/")).resolve()
+    rel = src.lstrip("/")
+    dst_path = backup_dir / rel
+
+    item = {
+        "source": str(src),
+        "source_resolved": str(src_path),
+        "backup_path": str(dst_path),
+        "exists": src_path.exists(),
+        "copied": False,
+        "type": None,
+        "sha256": None,
+        "error": None,
+    }
+
+    if not src_path.exists():
+        return item
+
+    try:
+        if src_path.is_dir():
+            item["type"] = "directory"
+            shutil.copytree(src_path, dst_path, dirs_exist_ok=True, symlinks=True)
+            item["copied"] = True
+        elif src_path.is_file():
+            item["type"] = "file"
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_path, dst_path)
+            item["sha256"] = sha256_file(src_path)
+            item["copied"] = True
+        else:
+            item["type"] = "other"
+            item["error"] = "not a regular file or directory"
+    except Exception as e:
+        item["error"] = str(e)
+
+    return item
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Create a live router config backup.")
+    ap.add_argument("--preflight-report", required=True)
+    ap.add_argument("--backup-dir", required=True)
+    ap.add_argument("--root", default="/")
+    ap.add_argument("--yes", action="store_true", help="Required to create backup.")
+    ap.add_argument("--allow-live-root", action="store_true", help="Required when --root /.")
+    ap.add_argument("--extra-path", action="append", default=[])
+    args = ap.parse_args()
+
+    preflight = load_json(args.preflight_report)
+    root = Path(args.root).resolve()
+    backup_dir = Path(args.backup_dir).resolve()
+
+    if not args.yes:
+        print("ERROR: refusing to create backup without --yes", file=sys.stderr)
+        return 2
+
+    if root == Path("/") and not args.allow_live_root:
+        print("ERROR: refusing to inspect live / for backup without --allow-live-root", file=sys.stderr)
+        return 2
+
+    if preflight.get("schema") != "lilhouse.router_live_preflight.v1":
+        print("ERROR: preflight report schema mismatch", file=sys.stderr)
+        return 2
+
+    if preflight.get("ok") is not True:
+        print("ERROR: preflight report is not OK", file=sys.stderr)
+        return 2
+
+    if preflight.get("summary", {}).get("ready_for_live_backup") is not True:
+        print("ERROR: preflight did not approve live backup", file=sys.stderr)
+        return 2
+
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    paths = list(dict.fromkeys(BACKUP_PATHS + args.extra_path))
+    items = [copy_item(path, root, backup_dir) for path in paths]
+
+    copied = [i for i in items if i["copied"]]
+    errors = [i for i in items if i["error"]]
+
+    report = {
+        "schema": "lilhouse.router_live_backup.v1",
+        "ok": len(errors) == 0 and len(copied) > 0,
+        "generated_at": now_iso(),
+        "mode": "live-backup-create",
+        "inputs": {
+            "preflight_report": str(Path(args.preflight_report)),
+            "backup_dir": str(backup_dir),
+            "root": str(root),
+            "allow_live_root": args.allow_live_root,
+            "yes": args.yes,
+            "extra_paths": args.extra_path,
+        },
+        "safety": {
+            "apply": False,
+            "live_changes": False,
+            "copies_files": True,
+            "copies_into_backup_only": True,
+            "modifies_source_root": False,
+            "runs_services": False,
+            "writes_config": False,
+            "reads_live_state": True,
+        },
+        "summary": {
+            "path_count": len(paths),
+            "copied_count": len(copied),
+            "missing_count": len([i for i in items if not i["exists"]]),
+            "error_count": len(errors),
+            "ready_for_rollback_arm": len(errors) == 0 and len(copied) > 0,
+            "ready_for_live_apply": False,
+            "safe_to_apply_live": False,
+            "next_gate": "rollback-arm",
+        },
+        "items": items,
+    }
+
+    report_path = backup_dir / "live-backup-report.json"
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["ok"] else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
