@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def gate(name, ok, detail):
+    return {
+        "name": name,
+        "ok": bool(ok),
+        "detail": detail,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Create a LilHouse router apply plan from a successful deploy preflight report. Does not apply."
+    )
+    parser.add_argument("preflight_report", help="deploy-preflight-report.json or preflight JSON output.")
+    parser.add_argument("--target-root", default="/", help="Future apply target root. Defaults to / for planning only.")
+    args = parser.parse_args()
+
+    report_path = Path(args.preflight_report).resolve()
+    target_root = Path(args.target_root).resolve()
+
+    if not report_path.is_file():
+        print(f"ERROR: preflight report not found: {report_path}", file=sys.stderr)
+        return 1
+
+    preflight = json.loads(report_path.read_text(encoding="utf-8"))
+
+    gates = [
+        gate(
+            "preflight_schema",
+            preflight.get("schema") == "lilhouse.router_deploy_preflight.v1",
+            "Input must be a deploy preflight report.",
+        ),
+        gate(
+            "preflight_ok",
+            preflight.get("ok") is True,
+            "Full deploy preflight must be OK.",
+        ),
+        gate(
+            "preview_validated",
+            preflight.get("summary", {}).get("preview_validated") is True,
+            "Preview validator must pass.",
+        ),
+        gate(
+            "safety_loop_ok",
+            preflight.get("summary", {}).get("safety_loop_ok") is True,
+            "Backup/verify/restore safety loop must pass.",
+        ),
+        gate(
+            "stage_validate_ok",
+            preflight.get("summary", {}).get("stage_validate_ok") is True,
+            "Staged root validation must pass.",
+        ),
+        gate(
+            "stage_validate_errors_zero",
+            preflight.get("summary", {}).get("stage_validate_errors") == 0,
+            "Staged root validation must have zero errors.",
+        ),
+    ]
+
+    gates_ok = all(g["ok"] for g in gates)
+
+    stage_root = preflight.get("stage_root")
+    preview_dir = preflight.get("preview_dir")
+
+    actions = [
+        {
+            "order": 10,
+            "name": "confirm_console_or_local_access",
+            "apply_now": False,
+            "reason": "Before live router apply, confirm a non-network recovery path exists.",
+        },
+        {
+            "order": 20,
+            "name": "create_fresh_live_backup",
+            "apply_now": False,
+            "command": "lilhouse-router-backup-create --root / --backup-dir /var/backups/lilhouse/router-deploy/<timestamp> --yes",
+            "reason": "Back up current live router config immediately before changes.",
+        },
+        {
+            "order": 30,
+            "name": "verify_fresh_live_backup",
+            "apply_now": False,
+            "command": "lilhouse-router-backup-verify /var/backups/lilhouse/router-deploy/<timestamp>",
+            "reason": "Refuse apply unless backup verifies.",
+        },
+        {
+            "order": 40,
+            "name": "arm_timed_rollback",
+            "apply_now": False,
+            "reason": "Future apply must install a rollback timer before changing network/firewall state.",
+        },
+        {
+            "order": 50,
+            "name": "copy_staged_files_to_target",
+            "apply_now": False,
+            "source": stage_root,
+            "target": str(target_root),
+            "reason": "Copy validated staged preview files into the target root.",
+        },
+        {
+            "order": 60,
+            "name": "validate_firewall_syntax",
+            "apply_now": False,
+            "tool": "nftables syntax check",
+            "target": "/etc/nftables.conf",
+            "reason": "Refuse activation if nftables syntax is invalid.",
+        },
+        {
+            "order": 70,
+            "name": "reload_systemd",
+            "apply_now": False,
+            "command": "systemctl daemon-reload",
+            "reason": "Load staged unit files before controlled service activation.",
+        },
+        {
+            "order": 80,
+            "name": "apply_forwarding_sysctl",
+            "apply_now": False,
+            "command": "sysctl --system",
+            "reason": "Enable forwarding after config files are staged.",
+        },
+        {
+            "order": 90,
+            "name": "activate_services",
+            "apply_now": False,
+            "commands": [
+                "systemctl enable --now nftables",
+                "systemctl enable --now systemd-networkd",
+                "systemctl enable --now lilhouse-current-state.timer",
+                "systemctl enable --now lilhouse-storage-health.timer",
+            ],
+            "reason": "Services activate only after all gates pass.",
+        },
+        {
+            "order": 100,
+            "name": "post_apply_health_check",
+            "apply_now": False,
+            "reason": "Check SSH/admin reachability, LAN gateway, DNS, DHCP, WAN, and rollback cancellation.",
+        },
+    ]
+
+    result = {
+        "schema": "lilhouse.router_apply_plan.v1",
+        "mode": "apply-plan",
+        "apply": False,
+        "live_changes": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "preflight_report": str(report_path),
+        "target_root": str(target_root),
+        "stage_root": stage_root,
+        "preview_dir": preview_dir,
+        "ok": gates_ok,
+        "gates": gates,
+        "actions": actions,
+        "summary": {
+            "gate_count": len(gates),
+            "gates_ok": sum(1 for g in gates if g["ok"]),
+            "actions_planned": len(actions),
+            "requires_timed_rollback": True,
+            "requires_fresh_backup": True,
+            "requires_manual_confirmation": True,
+            "safe_to_apply_now": False,
+        },
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

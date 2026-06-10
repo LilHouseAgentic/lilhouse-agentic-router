@@ -33,6 +33,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-safety-loop"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-stage-preview"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-stage-validate"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-deploy-preflight"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-apply-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -343,6 +344,23 @@ assert data["summary"]["safety_loop_ok"] is True
 assert data["summary"]["stage_validate_ok"] is True
 assert data["summary"]["stage_validate_errors"] == 0
 assert data["summary"]["stage_preview_count"] >= 10
+PYJSON
+
+"$REPO_DIR/bin/lilhouse-router-apply-plan" "$PREFLIGHT_OUT/deploy-preflight-report.json" >"$TMP_STATE/router-apply-plan.json"
+python3 -m json.tool "$TMP_STATE/router-apply-plan.json" >/dev/null
+
+python3 - "$TMP_STATE/router-apply-plan.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_apply_plan.v1"
+assert data["apply"] is False
+assert data["live_changes"] is False
+assert data["ok"] is True
+assert data["summary"]["requires_timed_rollback"] is True
+assert data["summary"]["requires_fresh_backup"] is True
+assert data["summary"]["requires_manual_confirmation"] is True
+assert data["summary"]["safe_to_apply_now"] is False
+assert data["summary"]["actions_planned"] >= 8
 PYJSON
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
