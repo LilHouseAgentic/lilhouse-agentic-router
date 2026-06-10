@@ -52,6 +52,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-service-activation-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-service-activation-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-service-activation-rehearsal"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-readiness-review"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-health-probe-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -898,6 +899,31 @@ grep -q "refusing to restore into live / without --allow-live-root" "$TMP_STATE/
 
 "$REPO_DIR/bin/lilhouse-router-restore-create" "$RESTORE_GUARD_BACKUP" --root "$RESTORE_GUARD_FAKE_ROOT" --yes >"$TMP_STATE/router-restore-guard-fake-root.json"
 python3 -m json.tool "$TMP_STATE/router-restore-guard-fake-root.json" >/dev/null
+
+
+"$REPO_DIR/bin/lilhouse-router-health-probe-plan" \
+  "$HEALTH_REHEARSAL_OUT/post-apply-health-rehearsal-report.json" \
+  --lan-ip 10.23.0.1 \
+  --dns-test-name example.com \
+  --wan-test-ip 1.1.1.1 \
+  --timeout-seconds 120 >"$TMP_STATE/router-health-probe-plan.json"
+
+python3 -m json.tool "$TMP_STATE/router-health-probe-plan.json" >/dev/null
+
+python3 - "$TMP_STATE/router-health-probe-plan.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_health_probe_plan.v1"
+assert data["apply"] is False
+assert data["live_changes"] is False
+assert data["runs_probes"] is False
+assert data["ok"] is True
+assert data["summary"]["probe_count"] >= 7
+assert data["summary"]["requires_all_probes_pass"] is True
+assert data["summary"]["rollback_cancel_allowed_only_after_pass"] is True
+assert data["summary"]["safe_to_cancel_rollback_now"] is False
+assert data["summary"]["safe_to_apply_live"] is False
+PYJSON
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
 "$REPO_DIR/bin/lilhouse-router-wizard" \
