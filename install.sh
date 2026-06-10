@@ -192,6 +192,7 @@ backup_existing /usr/local/bin/lilhouse-router-restore-create
 backup_existing /usr/local/bin/lilhouse-router-safety-loop
 backup_existing /usr/local/bin/lilhouse-router-stage-preview
 backup_existing /usr/local/bin/lilhouse-router-stage-validate
+backup_existing /usr/local/bin/lilhouse-router-deploy-preflight
 backup_existing /usr/local/bin/lilhouse-status
 backup_existing /etc/systemd/system/lilhouse-current-state.service
 backup_existing /etc/systemd/system/lilhouse-current-state.timer
@@ -218,6 +219,7 @@ install -m 0755 "$REPO_DIR/bin/lilhouse-router-restore-create" "$(root_path /usr
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-safety-loop" "$(root_path /usr/local/bin/lilhouse-router-safety-loop)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-stage-preview" "$(root_path /usr/local/bin/lilhouse-router-stage-preview)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-stage-validate" "$(root_path /usr/local/bin/lilhouse-router-stage-validate)"
+install -m 0755 "$REPO_DIR/bin/lilhouse-router-deploy-preflight" "$(root_path /usr/local/bin/lilhouse-router-deploy-preflight)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-status" "$(root_path /usr/local/bin/lilhouse-status)"
 
 install -m 0644 "$REPO_DIR/systemd/lilhouse-current-state.service" "$(root_path /etc/systemd/system/lilhouse-current-state.service)"

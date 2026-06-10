@@ -32,6 +32,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-restore-create"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-safety-loop"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-stage-preview"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-stage-validate"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-deploy-preflight"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -313,6 +314,36 @@ grep -q '"apply": false' "$TMP_STATE/router-stage-validate.json"
 grep -q '"live_root_allowed": false' "$TMP_STATE/router-stage-validate.json"
 grep -q '"ok": true' "$TMP_STATE/router-stage-validate.json"
 grep -q '"error_count": 0' "$TMP_STATE/router-stage-validate.json"
+
+PREFLIGHT_OUT="$TMP_STATE/router-deploy-preflight"
+PREFLIGHT_STAGE="$TMP_STATE/router-deploy-preflight-stage"
+"$REPO_DIR/bin/lilhouse-router-deploy-preflight" \
+  --out-dir "$PREFLIGHT_OUT" \
+  --source-root "$TMP_ROOT" \
+  --stage-root "$PREFLIGHT_STAGE" \
+  --wan eth0 \
+  --lan eth1 \
+  --enable-cake \
+  --enable-ipv6 >"$TMP_STATE/router-deploy-preflight.json"
+
+python3 -m json.tool "$TMP_STATE/router-deploy-preflight.json" >/dev/null
+test -f "$PREFLIGHT_OUT/deploy-preflight-report.json"
+test -f "$PREFLIGHT_STAGE/etc/nftables.conf"
+test -f "$PREFLIGHT_STAGE/etc/lilhouse/pihole-dns-plan.env"
+
+python3 - "$TMP_STATE/router-deploy-preflight.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_deploy_preflight.v1"
+assert data["apply"] is False
+assert data["live_root_allowed"] is False
+assert data["ok"] is True
+assert data["summary"]["preview_validated"] is True
+assert data["summary"]["safety_loop_ok"] is True
+assert data["summary"]["stage_validate_ok"] is True
+assert data["summary"]["stage_validate_errors"] == 0
+assert data["summary"]["stage_preview_count"] >= 10
+PYJSON
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
 "$REPO_DIR/bin/lilhouse-router-wizard" \

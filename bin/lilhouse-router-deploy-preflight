@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def run_text(cmd):
+    return subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
+
+
+def run_json(cmd):
+    return json.loads(run_text(cmd))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Run full LilHouse router deploy preflight without touching live system."
+    )
+    parser.add_argument("--out-dir", required=True, help="Output directory for preflight artifacts.")
+    parser.add_argument("--source-root", required=True, help="Root to back up from for safety-loop test.")
+    parser.add_argument("--stage-root", required=True, help="Target root to stage preview into.")
+    parser.add_argument("--wan", default=None, help="WAN interface override.")
+    parser.add_argument("--lan", default=None, help="LAN interface override.")
+    parser.add_argument("--enable-cake", action="store_true")
+    parser.add_argument("--enable-ipv6", action="store_true")
+    args = parser.parse_args()
+
+    script_dir = Path(__file__).resolve().parent
+    out_dir = Path(args.out_dir).resolve()
+    source_root = Path(args.source_root).resolve()
+    stage_root = Path(args.stage_root).resolve()
+
+    if str(stage_root) == "/":
+        print("ERROR: refusing to stage into live /", file=sys.stderr)
+        return 2
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    wizard_out = out_dir / "wizard"
+    backup_dir = out_dir / "backup"
+    restore_root = out_dir / "restore-test"
+
+    wizard_cmd = [
+        str(script_dir / "lilhouse-router-wizard"),
+        "--out-dir", str(wizard_out),
+    ]
+    if args.wan:
+        wizard_cmd += ["--wan", args.wan]
+    if args.lan:
+        wizard_cmd += ["--lan", args.lan]
+    if args.enable_cake:
+        wizard_cmd += ["--enable-cake"]
+    if args.enable_ipv6:
+        wizard_cmd += ["--enable-ipv6"]
+
+    wizard_output = run_text(wizard_cmd)
+
+    preview_dir = wizard_out / "preview"
+
+    preview_validate_output = run_text([
+        str(script_dir / "lilhouse-router-preview-validate"),
+        str(preview_dir),
+    ])
+
+    safety_loop = run_json([
+        str(script_dir / "lilhouse-router-safety-loop"),
+        "--root", str(source_root),
+        "--backup-dir", str(backup_dir),
+        "--restore-root", str(restore_root),
+        "--yes",
+    ])
+
+    stage_preview = run_json([
+        str(script_dir / "lilhouse-router-stage-preview"),
+        str(preview_dir),
+        "--target-root", str(stage_root),
+        "--yes",
+    ])
+
+    stage_validate = run_json([
+        str(script_dir / "lilhouse-router-stage-validate"),
+        str(stage_root),
+    ])
+
+    result = {
+        "schema": "lilhouse.router_deploy_preflight.v1",
+        "mode": "deploy-preflight",
+        "apply": False,
+        "live_root_allowed": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "out_dir": str(out_dir),
+        "source_root": str(source_root),
+        "stage_root": str(stage_root),
+        "preview_dir": str(preview_dir),
+        "ok": (
+            safety_loop.get("ok") is True
+            and stage_validate.get("ok") is True
+            and stage_preview.get("staged_count", 0) >= 10
+        ),
+        "summary": {
+            "wizard_generated": preview_dir.is_dir(),
+            "preview_validated": "Preview validation passed" in preview_validate_output,
+            "safety_loop_ok": safety_loop.get("ok") is True,
+            "stage_preview_count": stage_preview.get("staged_count", 0),
+            "stage_validate_ok": stage_validate.get("ok") is True,
+            "stage_validate_errors": stage_validate.get("error_count", 0),
+        },
+        "reports": {
+            "wizard_output": wizard_output,
+            "preview_validate_output": preview_validate_output,
+            "safety_loop": safety_loop,
+            "stage_preview": stage_preview,
+            "stage_validate": stage_validate,
+        },
+    }
+
+    report_path = out_dir / "deploy-preflight-report.json"
+    report_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
