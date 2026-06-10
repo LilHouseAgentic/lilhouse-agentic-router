@@ -18,6 +18,7 @@ rm -f /etc/systemd/system/lilhouse-status.service
 rm -f /usr/local/bin/lilhouse-event
 rm -f /usr/local/bin/lilhouse-action
 rm -f /usr/local/bin/lilhouse-current-state
+rm -f /usr/local/bin/lilhouse-storage-health
 rm -f /usr/local/bin/lilhouse-status
 rm -f /usr/lib/lilhouse/lilhouse-common.sh
 

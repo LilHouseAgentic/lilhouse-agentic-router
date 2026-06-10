@@ -20,6 +20,7 @@ This repository is being extracted from a live Raspberry Pi router prototype.
 - Checks Docker container health
 - Detects interface drops, errors, and link changes
 - Watches storage, mounts, logs, and system resources
+- Provides a portable storage health worker
 - Maintains event, action, and proposal ledgers
 - Supports permission-gated upgrade proposals
 - Supports optional AI planning with bring-your-own API key
