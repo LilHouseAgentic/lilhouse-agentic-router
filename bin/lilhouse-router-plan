@@ -149,6 +149,22 @@ plan = {
             "intent": "Configure the selected DNS mode.",
             "risk": "medium",
             "apply_status": "not_implemented",
+            "planned_files": [
+                "/etc/pihole/pihole.toml",
+                "/etc/unbound/unbound.conf.d/lilhouse.conf"
+            ],
+            "planned_settings": {
+                "mode": args.dns_mode,
+                "lan_dns_address": args.lan_ip,
+                "pihole_interface": args.lan,
+                "pihole_listen": "lan_only",
+                "unbound_listen": "127.0.0.1",
+                "unbound_port": 5335,
+                "pihole_upstream": "127.0.0.1#5335",
+                "block_icould_private_relay": "planned",
+                "block_doh_canary": "planned",
+                "comment": "DNS blueprint only. No Pi-hole or Unbound settings are written by this command."
+            },
         },
         {
             "name": "dhcp",
