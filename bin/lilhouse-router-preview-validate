@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PREVIEW_DIR="${1:-}"
+
+fail() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+need_file() {
+  local file="$1"
+  test -f "$PREVIEW_DIR/$file" || fail "missing preview file: $file"
+}
+
+need_grep() {
+  local pattern="$1"
+  local file="$2"
+  grep -q "$pattern" "$PREVIEW_DIR/$file" || fail "missing pattern in $file: $pattern"
+}
+
+if [ -z "$PREVIEW_DIR" ]; then
+  fail "usage: lilhouse-router-preview-validate /path/to/preview"
+fi
+
+test -d "$PREVIEW_DIR" || fail "preview directory not found: $PREVIEW_DIR"
+
+need_file "MANIFEST.txt"
+need_file "ROLLBACK-NOTES.txt"
+need_file "VALIDATION-CHECKLIST.txt"
+
+need_file "etc/systemd/network/20-lilhouse-lan.network"
+need_file "etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+need_file "etc/nftables.conf"
+need_file "etc/lilhouse/pihole-dns-plan.env"
+need_file "etc/lilhouse/pihole-dhcp-plan.env"
+need_file "etc/unbound/unbound.conf.d/lilhouse.conf"
+
+need_file "etc/systemd/system/lilhouse-current-state.service"
+need_file "etc/systemd/system/lilhouse-current-state.timer"
+need_file "etc/systemd/system/lilhouse-storage-health.service"
+need_file "etc/systemd/system/lilhouse-storage-health.timer"
+
+need_grep "LilHouse router deploy preview manifest" "MANIFEST.txt"
+need_grep "No files here have been written to the live system" "MANIFEST.txt"
+need_grep "ROLLBACK-NOTES.txt" "MANIFEST.txt"
+need_grep "VALIDATION-CHECKLIST.txt" "MANIFEST.txt"
+
+need_grep "LilHouse router deploy rollback preview" "ROLLBACK-NOTES.txt"
+need_grep "Do not enable apply mode" "ROLLBACK-NOTES.txt"
+
+need_grep "LilHouse router deploy validation checklist" "VALIDATION-CHECKLIST.txt"
+need_grep "Apply mode must validate, back up, stage, test, and only then activate" "VALIDATION-CHECKLIST.txt"
+
+need_grep "\\[Match\\]" "etc/systemd/network/20-lilhouse-lan.network"
+need_grep "\\[Network\\]" "etc/systemd/network/20-lilhouse-lan.network"
+need_grep "Address=" "etc/systemd/network/20-lilhouse-lan.network"
+
+need_grep "net.ipv4.ip_forward=1" "etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+need_grep "net.ipv6.conf.all.forwarding=" "etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+
+need_grep "table inet lilhouse_filter" "etc/nftables.conf"
+need_grep "policy drop" "etc/nftables.conf"
+need_grep "masquerade" "etc/nftables.conf"
+
+need_grep "LILHOUSE_DNS_MODE=pihole-unbound" "etc/lilhouse/pihole-dns-plan.env"
+need_grep "LILHOUSE_PIHOLE_UPSTREAM=127.0.0.1#5335" "etc/lilhouse/pihole-dns-plan.env"
+
+need_grep "LILHOUSE_DHCP_PROVIDER=pihole-FTL" "etc/lilhouse/pihole-dhcp-plan.env"
+need_grep "LILHOUSE_DHCP_AUTHORITATIVE=true" "etc/lilhouse/pihole-dhcp-plan.env"
+
+need_grep "interface: 127.0.0.1" "etc/unbound/unbound.conf.d/lilhouse.conf"
+need_grep "port: 5335" "etc/unbound/unbound.conf.d/lilhouse.conf"
+
+need_grep "ExecStart=/usr/local/bin/lilhouse-current-state" "etc/systemd/system/lilhouse-current-state.service"
+need_grep "OnUnitActiveSec=1min" "etc/systemd/system/lilhouse-current-state.timer"
+need_grep "ExecStart=/usr/local/bin/lilhouse-storage-health" "etc/systemd/system/lilhouse-storage-health.service"
+need_grep "OnUnitActiveSec=15min" "etc/systemd/system/lilhouse-storage-health.timer"
+
+if [ -f "$PREVIEW_DIR/etc/lilhouse/cake.env" ]; then
+  need_grep "LILHOUSE_CAKE_ENABLED=true" "etc/lilhouse/cake.env"
+  need_grep "LILHOUSE_CAKE_QDISC=cake" "etc/lilhouse/cake.env"
+fi
+
+if [ -f "$PREVIEW_DIR/etc/lilhouse/ipv6-plan.env" ]; then
+  need_grep "LILHOUSE_IPV6_ENABLED=true" "etc/lilhouse/ipv6-plan.env"
+  need_grep "LILHOUSE_IPV6_NAT66=false" "etc/lilhouse/ipv6-plan.env"
+  need_grep "LILHOUSE_IPV6_INBOUND_SSH=explicit_opt_in_only" "etc/lilhouse/ipv6-plan.env"
+  need_grep "net.ipv6.conf.all.forwarding=1" "etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+fi
+
+echo "Preview validation passed: $PREVIEW_DIR"
