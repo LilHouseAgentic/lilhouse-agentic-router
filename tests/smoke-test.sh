@@ -51,6 +51,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-post-apply-health-rehearsal"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-service-activation-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-service-activation-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-service-activation-rehearsal"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-readiness-review"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -840,6 +841,35 @@ assert data["summary"]["failure_blocks_sequence"] is True
 assert data["summary"]["failure_blocks_rollback_cancel"] is True
 assert data["summary"]["all_pass_allows_rollback_cancel_by_sequence"] is True
 assert data["summary"]["safe_to_cancel_rollback_now"] is False
+assert data["summary"]["safe_to_apply_live"] is False
+PYJSON
+
+
+"$REPO_DIR/bin/lilhouse-router-live-readiness-review" \
+  "$DRESS_OUT/full-dress-rehearsal-report.json" \
+  --rollback-rehearsal-report "$ROLLBACK_REHEARSAL_OUT/timed-rollback-rehearsal-report.json" \
+  --confirmation-plan-report "$TMP_STATE/router-live-confirmation-plan.json" \
+  --confirmation-check-report "$TMP_STATE/router-live-confirmation-check-good.json" \
+  --health-rehearsal-report "$HEALTH_REHEARSAL_OUT/post-apply-health-rehearsal-report.json" \
+  --service-rehearsal-report "$SERVICE_REHEARSAL_OUT/service-activation-rehearsal-report.json" >"$TMP_STATE/router-live-readiness-review.json"
+
+python3 -m json.tool "$TMP_STATE/router-live-readiness-review.json" >/dev/null
+
+python3 - "$TMP_STATE/router-live-readiness-review.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_live_readiness_review.v1"
+assert data["apply"] is False
+assert data["live_changes"] is False
+assert data["ok"] is True
+assert data["ready_for_live_apply"] is False
+assert data["summary"]["checks_passed"] == data["summary"]["checks_total"]
+assert data["summary"]["non_live_pipeline_proven"] is True
+assert data["summary"]["rollback_rehearsal_proven"] is True
+assert data["summary"]["confirmation_gate_proven"] is True
+assert data["summary"]["health_rehearsal_proven"] is True
+assert data["summary"]["service_rehearsal_proven"] is True
+assert data["summary"]["critical_blocker_count"] >= 1
 assert data["summary"]["safe_to_apply_live"] is False
 PYJSON
 

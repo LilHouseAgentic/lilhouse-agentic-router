@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def load_json(path: Path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Review complete non-live router readiness evidence and remaining live blockers."
+    )
+    parser.add_argument("full_dress_report")
+    parser.add_argument("--rollback-rehearsal-report", required=True)
+    parser.add_argument("--confirmation-plan-report", required=True)
+    parser.add_argument("--confirmation-check-report", required=True)
+    parser.add_argument("--health-rehearsal-report", required=True)
+    parser.add_argument("--service-rehearsal-report", required=True)
+    args = parser.parse_args()
+
+    paths = {
+        "full_dress_report": Path(args.full_dress_report).resolve(),
+        "rollback_rehearsal_report": Path(args.rollback_rehearsal_report).resolve(),
+        "confirmation_plan_report": Path(args.confirmation_plan_report).resolve(),
+        "confirmation_check_report": Path(args.confirmation_check_report).resolve(),
+        "health_rehearsal_report": Path(args.health_rehearsal_report).resolve(),
+        "service_rehearsal_report": Path(args.service_rehearsal_report).resolve(),
+    }
+
+    for label, path in paths.items():
+        if not path.is_file():
+            print(f"ERROR: {label} not found: {path}", file=sys.stderr)
+            return 1
+
+    full_dress = load_json(paths["full_dress_report"])
+    rollback = load_json(paths["rollback_rehearsal_report"])
+    confirmation_plan = load_json(paths["confirmation_plan_report"])
+    confirmation_check = load_json(paths["confirmation_check_report"])
+    health = load_json(paths["health_rehearsal_report"])
+    service = load_json(paths["service_rehearsal_report"])
+
+    checks = []
+
+    def check(name, ok, detail):
+        checks.append({"name": name, "ok": bool(ok), "detail": detail})
+
+    check(
+        "full_dress_schema",
+        full_dress.get("schema") == "lilhouse.router_full_dress_rehearsal.v1",
+        "full dress rehearsal schema must match",
+    )
+    check("full_dress_ok", full_dress.get("ok") is True, "full dress rehearsal must be OK")
+    check(
+        "full_dress_non_live",
+        full_dress.get("apply") is False and full_dress.get("live_changes") is False,
+        "full dress must remain non-live",
+    )
+
+    check(
+        "rollback_rehearsal_schema",
+        rollback.get("schema") == "lilhouse.router_timed_rollback_rehearsal.v1",
+        "rollback rehearsal schema must match",
+    )
+    check("rollback_rehearsal_ok", rollback.get("ok") is True, "rollback rehearsal must be OK")
+    check(
+        "rollback_units_validated",
+        rollback.get("summary", {}).get("rollback_units_validated") is True,
+        "rollback units must validate",
+    )
+
+    check(
+        "confirmation_plan_schema",
+        confirmation_plan.get("schema") == "lilhouse.router_live_confirmation_plan.v1",
+        "confirmation plan schema must match",
+    )
+    check("confirmation_plan_ok", confirmation_plan.get("ok") is True, "confirmation plan must be OK")
+    check(
+        "confirmation_exact_phrase_required",
+        confirmation_plan.get("confirmation_policy", {}).get("requires_exact_confirmation_phrase") is True,
+        "confirmation must require exact phrase",
+    )
+
+    check(
+        "confirmation_check_schema",
+        confirmation_check.get("schema") == "lilhouse.router_live_confirmation_check.v1",
+        "confirmation check schema must match",
+    )
+    check(
+        "confirmation_check_accepted",
+        confirmation_check.get("accepted") is True,
+        "exact confirmation phrase check must pass",
+    )
+
+    check(
+        "health_rehearsal_schema",
+        health.get("schema") == "lilhouse.router_post_apply_health_rehearsal.v1",
+        "health rehearsal schema must match",
+    )
+    check("health_rehearsal_ok", health.get("ok") is True, "health rehearsal must be OK")
+    check(
+        "health_failure_blocks_cancel",
+        health.get("summary", {}).get("failure_blocks_rollback_cancel") is True,
+        "health failure must block rollback cancellation",
+    )
+
+    check(
+        "service_rehearsal_schema",
+        service.get("schema") == "lilhouse.router_service_activation_rehearsal.v1",
+        "service activation rehearsal schema must match",
+    )
+    check("service_rehearsal_ok", service.get("ok") is True, "service activation rehearsal must be OK")
+    check(
+        "service_failure_blocks_cancel",
+        service.get("summary", {}).get("failure_blocks_rollback_cancel") is True,
+        "service failure must block rollback cancellation",
+    )
+
+    proven_ok = all(c["ok"] for c in checks)
+
+    remaining_blockers = [
+        {
+            "id": "live_root_restore_guard",
+            "severity": "critical",
+            "status": "missing",
+            "detail": "restore-create still needs an explicit live-root guard before any real rollback service can target /.",
+        },
+        {
+            "id": "real_health_probe_executor",
+            "severity": "critical",
+            "status": "missing",
+            "detail": "post-apply health is rehearsed with simulated results only; no live probe runner exists yet.",
+        },
+        {
+            "id": "real_service_activation_executor",
+            "severity": "critical",
+            "status": "missing",
+            "detail": "service activation order is rehearsed only; no live executor is allowed yet.",
+        },
+        {
+            "id": "live_apply_root_copy_executor",
+            "severity": "critical",
+            "status": "intentionally_blocked",
+            "detail": "copying staged files into live / remains intentionally unavailable.",
+        },
+    ]
+
+    result = {
+        "schema": "lilhouse.router_live_readiness_review.v1",
+        "mode": "live-readiness-review",
+        "apply": False,
+        "live_changes": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "ok": proven_ok,
+        "ready_for_live_apply": False,
+        "checks": checks,
+        "remaining_blockers": remaining_blockers,
+        "reports": {label: str(path) for label, path in paths.items()},
+        "summary": {
+            "checks_passed": sum(1 for c in checks if c["ok"]),
+            "checks_total": len(checks),
+            "non_live_pipeline_proven": proven_ok,
+            "rollback_rehearsal_proven": rollback.get("ok") is True,
+            "confirmation_gate_proven": confirmation_check.get("accepted") is True,
+            "health_rehearsal_proven": health.get("ok") is True,
+            "service_rehearsal_proven": service.get("ok") is True,
+            "remaining_blocker_count": len(remaining_blockers),
+            "critical_blocker_count": sum(1 for b in remaining_blockers if b["severity"] == "critical"),
+            "safe_to_apply_live": False,
+        },
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if proven_ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
