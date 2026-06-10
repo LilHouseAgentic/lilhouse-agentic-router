@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+VM_NIC_BYPASS_KEY = "I understand VM NIC bypass is not valid for live router approval"
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def write_json(path, data):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def run_cmd(name, argv, work_dir, env=None):
+    log_dir = work_dir / "bundle-command-logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    p = subprocess.run(
+        argv,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        env=env,
+    )
+
+    stdout_path = log_dir / f"{name}.stdout"
+    stderr_path = log_dir / f"{name}.stderr"
+
+    stdout_path.write_text(p.stdout, encoding="utf-8")
+    stderr_path.write_text(p.stderr, encoding="utf-8")
+
+    return {
+        "name": name,
+        "argv": [str(x) for x in argv],
+        "returncode": p.returncode,
+        "ok": p.returncode == 0,
+        "stdout_path": str(stdout_path),
+        "stderr_path": str(stderr_path),
+        "stderr": p.stderr.strip(),
+    }
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Build a VM-safe readiness bundle for the guarded router deploy chain.")
+    ap.add_argument("--work-dir", required=True)
+    ap.add_argument("--wan", default="eth0")
+    ap.add_argument("--lan", default="eth1")
+    ap.add_argument("--lan-ip", default="10.23.0.1")
+    ap.add_argument("--vm-nic-bypass-key", default="")
+    ap.add_argument("--yes", action="store_true")
+    ap.add_argument("--out", default="")
+    args = ap.parse_args()
+
+    if not args.yes:
+        print("ERROR: refusing to build VM readiness bundle without --yes", file=sys.stderr)
+        return 2
+
+    if args.vm_nic_bypass_key != VM_NIC_BYPASS_KEY:
+        print("ERROR: refusing VM NIC bypass without exact bypass key", file=sys.stderr)
+        print(f"Required key: {VM_NIC_BYPASS_KEY}", file=sys.stderr)
+        return 2
+
+    repo = Path(__file__).resolve().parent.parent
+    work_dir = Path(args.work_dir).resolve()
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    wizard_out = work_dir / "wizard"
+    orchestrator_root = work_dir / "orchestrator-root"
+    orchestrator_work = work_dir / "orchestrator-work"
+    preflight_json = work_dir / "vm-preflight.json"
+    orchestrator_json = work_dir / "guarded-deploy-dry-run.json"
+    live_plan_json = work_dir / "live-orchestrator-plan.json"
+
+    env = os.environ.copy()
+    env["ROUTER_WIZARD_WAN"] = args.wan
+    env["ROUTER_WIZARD_LAN"] = args.lan
+
+    write_json(preflight_json, {
+        "schema": "lilhouse.router_live_preflight.v1",
+        "ok": True,
+        "generated_at": now_iso(),
+        "mode": "vm-preflight-synthetic",
+        "vm_nic_bypass": True,
+        "vm_nic_bypass_valid_for_live": False,
+        "summary": {
+            "ready_for_live_backup": True,
+            "ready_for_live_apply": False,
+            "safe_to_apply_live": False
+        },
+        "safety": {
+            "apply": False,
+            "live_changes": False,
+            "reads_reports_only": True
+        }
+    })
+
+    commands = []
+
+    commands.append(run_cmd(
+        "router_deploy_wizard_dry_run",
+        [
+            str(repo / "install.sh"),
+            "--mode", "router-deploy",
+            "--wizard",
+            "--dry-run",
+            "--out-dir", str(wizard_out),
+        ],
+        work_dir,
+        env=env,
+    ))
+
+    if commands[-1]["ok"]:
+        commands.append(run_cmd(
+            "guarded_deploy_dry_run",
+            [
+                str(repo / "bin/lilhouse-router-guarded-deploy-dry-run"),
+                "--preflight-report", str(preflight_json),
+                "--preview-dir", str(wizard_out / "preview"),
+                "--target-root", str(orchestrator_root),
+                "--work-dir", str(orchestrator_work),
+                "--timeout-minutes", "5",
+                "--yes",
+                "--out", str(orchestrator_json),
+            ],
+            work_dir,
+        ))
+
+    if commands[-1]["ok"]:
+        commands.append(run_cmd(
+            "live_orchestrator_plan_only",
+            [
+                str(repo / "bin/lilhouse-router-live-orchestrator"),
+                "--preflight-report", str(preflight_json),
+                "--preview-dir", str(wizard_out / "preview"),
+                "--backup-dir", str(work_dir / "live-backup"),
+                "--work-dir", str(work_dir / "live-work"),
+                "--target-root", "/",
+                "--plan-only",
+                "--out", str(live_plan_json),
+            ],
+            work_dir,
+        ))
+
+    ok = all(c["ok"] for c in commands) and len(commands) == 3
+
+    report = {
+        "schema": "lilhouse.router_vm_readiness_bundle.v1",
+        "ok": ok,
+        "generated_at": now_iso(),
+        "mode": "vm-readiness-bundle",
+        "inputs": {
+            "work_dir": str(work_dir),
+            "wan": args.wan,
+            "lan": args.lan,
+            "lan_ip": args.lan_ip,
+            "vm_nic_bypass_key_matched": args.vm_nic_bypass_key == VM_NIC_BYPASS_KEY,
+        },
+        "safety": {
+            "apply": False,
+            "live_changes": False,
+            "vm_only": True,
+            "vm_nic_bypass": True,
+            "vm_nic_bypass_valid_for_live": False,
+            "target_live_root": False,
+            "runs_live_orchestrator": False,
+            "plan_only_live_orchestrator": True,
+        },
+        "summary": {
+            "command_count": 3,
+            "completed_command_count": len(commands),
+            "successful_command_count": len([c for c in commands if c["ok"]]),
+            "failed_command_count": len([c for c in commands if not c["ok"]]),
+            "vm_bundle_complete": ok,
+            "valid_for_live_router_approval": False,
+            "ready_for_live_apply": False,
+            "safe_to_apply_live": False,
+            "next_gate": "real-live-readiness-bundle-on-pi",
+        },
+        "paths": {
+            "wizard_out": str(wizard_out),
+            "preview_dir": str(wizard_out / "preview"),
+            "preflight_report": str(preflight_json),
+            "guarded_deploy_dry_run": str(orchestrator_json),
+            "live_orchestrator_plan": str(live_plan_json),
+        },
+        "commands": commands,
+    }
+
+    if args.out:
+        write_json(args.out, report)
+
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if ok else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

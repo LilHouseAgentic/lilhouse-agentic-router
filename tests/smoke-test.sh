@@ -1946,4 +1946,54 @@ LIVE_ORCH_BAD_PHRASE_RC=$?
 set -e
 test "$LIVE_ORCH_BAD_PHRASE_RC" -eq 2
 
+
+echo
+echo "== run VM readiness bundle with NIC bypass key =="
+
+VM_BUNDLE_WORK="$TMP_STATE/vm-readiness-bundle"
+VM_BUNDLE_JSON="$TMP_STATE/vm-readiness-bundle.json"
+VM_BYPASS_KEY="I understand VM NIC bypass is not valid for live router approval"
+
+set +e
+"$REPO_DIR/bin/lilhouse-router-vm-readiness-bundle" \
+  --work-dir "$VM_BUNDLE_WORK" \
+  --wan eth0 \
+  --lan eth1 \
+  --yes >"$TMP_STATE/vm-readiness-bundle-refuse-key.json"
+VM_BUNDLE_NO_KEY_RC=$?
+set -e
+test "$VM_BUNDLE_NO_KEY_RC" -eq 2
+
+"$REPO_DIR/bin/lilhouse-router-vm-readiness-bundle" \
+  --work-dir "$VM_BUNDLE_WORK" \
+  --wan eth0 \
+  --lan eth1 \
+  --vm-nic-bypass-key "$VM_BYPASS_KEY" \
+  --yes \
+  --out "$VM_BUNDLE_JSON" >"$TMP_STATE/vm-readiness-bundle.out"
+
+python3 - "$VM_BUNDLE_JSON" <<'PYJSON'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text())
+assert report["schema"] == "lilhouse.router_vm_readiness_bundle.v1"
+assert report["ok"] is True
+assert report["safety"]["apply"] is False
+assert report["safety"]["live_changes"] is False
+assert report["safety"]["vm_only"] is True
+assert report["safety"]["vm_nic_bypass"] is True
+assert report["safety"]["vm_nic_bypass_valid_for_live"] is False
+assert report["safety"]["runs_live_orchestrator"] is False
+assert report["safety"]["plan_only_live_orchestrator"] is True
+assert report["summary"]["vm_bundle_complete"] is True
+assert report["summary"]["valid_for_live_router_approval"] is False
+assert report["summary"]["ready_for_live_apply"] is False
+assert report["summary"]["safe_to_apply_live"] is False
+assert report["summary"]["next_gate"] == "real-live-readiness-bundle-on-pi"
+assert len(report["commands"]) == 3
+assert all(cmd["ok"] is True for cmd in report["commands"])
+PYJSON
+
 echo "Smoke test passed."
