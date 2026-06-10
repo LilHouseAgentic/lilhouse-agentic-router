@@ -94,6 +94,16 @@ plan = {
             "intent": "Configure the LAN interface with the requested static router address.",
             "risk": "high",
             "apply_status": "not_implemented",
+            "planned_files": [
+                "/etc/systemd/network/20-lilhouse-lan.network"
+            ],
+            "planned_settings": {
+                "networkd_match_name": args.lan,
+                "address": f"{args.lan_ip}/{subnet.prefixlen}" if subnet is not None else args.lan_ip,
+                "dhcp_server": "planned_separately",
+                "ipv6_accept_ra": False,
+                "comment": "LAN static-address blueprint only. No files are written by this command."
+            },
         },
         {
             "name": "forwarding",
