@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+python3 - "$@" <<'PY'
+import json
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+def run_json(cmd):
+    try:
+        out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
+        return json.loads(out)
+    except Exception:
+        return []
+
+def run_text(cmd):
+    try:
+        return subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL).strip()
+    except Exception:
+        return ""
+
+links = run_json(["ip", "-j", "link", "show"])
+addrs = run_json(["ip", "-j", "addr", "show"])
+routes4 = run_text(["ip", "route", "show", "default"])
+routes6 = run_text(["ip", "-6", "route", "show", "default"])
+
+addr_by_if = {item.get("ifname"): item for item in addrs}
+
+interfaces = []
+
+for link in links:
+    name = link.get("ifname", "")
+    if not name or name == "lo":
+        continue
+
+    addr_info = addr_by_if.get(name, {}).get("addr_info", [])
+    ipv4 = []
+    ipv6 = []
+
+    for addr in addr_info:
+        family = addr.get("family")
+        local = addr.get("local")
+        prefixlen = addr.get("prefixlen")
+        if not local:
+            continue
+        value = f"{local}/{prefixlen}" if prefixlen is not None else local
+        if family == "inet":
+            ipv4.append(value)
+        elif family == "inet6":
+            ipv6.append(value)
+
+    interfaces.append({
+        "name": name,
+        "operstate": link.get("operstate", ""),
+        "mac": link.get("address", ""),
+        "mtu": link.get("mtu"),
+        "flags": link.get("flags", []),
+        "ipv4": ipv4,
+        "ipv6": ipv6,
+        "likely_roles": [],
+    })
+
+for iface in interfaces:
+    name = iface["name"]
+    if name in routes4 or name in routes6:
+        iface["likely_roles"].append("wan_candidate")
+    if iface["ipv4"] and "wan_candidate" not in iface["likely_roles"]:
+        iface["likely_roles"].append("lan_candidate")
+    if not iface["likely_roles"]:
+        iface["likely_roles"].append("unknown")
+
+report = {
+    "schema": "lilhouse.interface_report.v1",
+    "generated_at": datetime.now(timezone.utc).astimezone().isoformat(),
+    "summary": "Read-only interface inventory. No system changes are made.",
+    "default_routes": {
+        "ipv4": routes4,
+        "ipv6": routes6,
+    },
+    "interfaces": interfaces,
+}
+
+print(json.dumps(report, indent=2, sort_keys=True))
+PY
