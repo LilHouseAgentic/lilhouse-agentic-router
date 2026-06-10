@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Check the explicit confirmation phrase required before future live router apply."
+    )
+    parser.add_argument("confirmation_plan", help="live confirmation plan JSON.")
+    parser.add_argument("--phrase", required=True, help="Confirmation phrase supplied by operator.")
+    args = parser.parse_args()
+
+    plan_path = Path(args.confirmation_plan).resolve()
+    if not plan_path.is_file():
+        print(f"ERROR: confirmation plan not found: {plan_path}", file=sys.stderr)
+        return 1
+
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    errors = []
+
+    if plan.get("schema") != "lilhouse.router_live_confirmation_plan.v1":
+        errors.append("input is not a live confirmation plan")
+    if plan.get("ok") is not True:
+        errors.append("confirmation plan is not OK")
+    if plan.get("apply") is not False:
+        errors.append("confirmation plan must be non-applying")
+    if plan.get("live_changes") is not False:
+        errors.append("confirmation plan must declare live_changes false")
+
+    policy = plan.get("confirmation_policy", {})
+    expected = policy.get("confirmation_phrase")
+
+    accepted = bool(expected) and args.phrase == expected
+    if not accepted:
+        errors.append("confirmation phrase did not match exact required phrase")
+
+    result = {
+        "schema": "lilhouse.router_live_confirmation_check.v1",
+        "mode": "live-confirmation-check",
+        "apply": False,
+        "live_changes": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "confirmation_plan": str(plan_path),
+        "accepted": accepted,
+        "ok": accepted and not [e for e in errors if "phrase" not in e],
+        "error_count": len(errors),
+        "errors": errors,
+        "summary": {
+            "reject_plain_yes": policy.get("reject_plain_yes") is True,
+            "requires_exact_confirmation_phrase": policy.get("requires_exact_confirmation_phrase") is True,
+            "confirmation_accepted": accepted,
+            "ready_for_live_apply": False,
+            "safe_to_apply_live": False,
+        },
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if accepted and not [e for e in errors if "phrase" not in e] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

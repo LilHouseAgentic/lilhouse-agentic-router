@@ -44,6 +44,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-timed-rollback-create"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-timed-rollback-validate"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-timed-rollback-rehearsal"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-confirmation-plan"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-confirmation-check"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -592,6 +593,30 @@ assert data["summary"]["safe_to_apply_live"] is False
 assert data["confirmation_policy"]["requires_exact_confirmation_phrase"] is True
 assert data["confirmation_policy"]["reject_plain_yes"] is True
 assert data["summary"]["checks_passed"] == data["summary"]["checks_total"]
+PYJSON
+
+set +e
+"$REPO_DIR/bin/lilhouse-router-live-confirmation-check" "$TMP_STATE/router-live-confirmation-plan.json" --phrase "yes" >"$TMP_STATE/router-live-confirmation-check-bad.json"
+BAD_CONFIRM_EXIT=$?
+set -e
+test "$BAD_CONFIRM_EXIT" -ne 0
+
+"$REPO_DIR/bin/lilhouse-router-live-confirmation-check" \
+  "$TMP_STATE/router-live-confirmation-plan.json" \
+  --phrase "I have local console access and accept temporary network interruption" >"$TMP_STATE/router-live-confirmation-check-good.json"
+
+python3 -m json.tool "$TMP_STATE/router-live-confirmation-check-good.json" >/dev/null
+
+python3 - "$TMP_STATE/router-live-confirmation-check-good.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_live_confirmation_check.v1"
+assert data["apply"] is False
+assert data["live_changes"] is False
+assert data["accepted"] is True
+assert data["summary"]["confirmation_accepted"] is True
+assert data["summary"]["ready_for_live_apply"] is False
+assert data["summary"]["safe_to_apply_live"] is False
 PYJSON
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
