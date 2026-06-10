@@ -27,6 +27,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-create"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-verify"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-restore-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -228,6 +229,15 @@ python3 -m json.tool "$TMP_STATE/router-backup-verify.json" >/dev/null
 grep -q '"schema": "lilhouse.router_backup_verify.v1"' "$TMP_STATE/router-backup-verify.json"
 grep -q '"ok": true' "$TMP_STATE/router-backup-verify.json"
 grep -q '"error_count": 0' "$TMP_STATE/router-backup-verify.json"
+
+RESTORE_TARGET="$TMP_STATE/router-restore-target"
+mkdir -p "$RESTORE_TARGET"
+"$REPO_DIR/bin/lilhouse-router-restore-dry-run" "$BACKUP_OUT" --root "$RESTORE_TARGET" >"$TMP_STATE/router-restore-dry-run.json"
+python3 -m json.tool "$TMP_STATE/router-restore-dry-run.json" >/dev/null
+grep -q '"schema": "lilhouse.router_restore_dry_run.v1"' "$TMP_STATE/router-restore-dry-run.json"
+grep -q '"apply": false' "$TMP_STATE/router-restore-dry-run.json"
+grep -q '"copies_files": false' "$TMP_STATE/router-restore-dry-run.json"
+grep -q '"would_restore": 4' "$TMP_STATE/router-restore-dry-run.json"
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
 "$REPO_DIR/bin/lilhouse-router-wizard" \

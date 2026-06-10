@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from pathlib import Path
+
+
+def rooted(root: Path, absolute_path: str) -> Path:
+    return root / absolute_path.lstrip("/")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Generate a router deploy restore dry-run report. No files are copied."
+    )
+    parser.add_argument("backup_dir", help="Backup directory containing backup-report.json.")
+    parser.add_argument("--root", default="/", help="Root filesystem restore target to describe.")
+    args = parser.parse_args()
+
+    backup_dir = Path(args.backup_dir).resolve()
+    root = Path(args.root).resolve()
+    report_path = backup_dir / "backup-report.json"
+
+    if not report_path.is_file():
+        print(f"ERROR: backup report not found: {report_path}", file=sys.stderr)
+        return 1
+
+    backup_report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    entries = []
+    for entry in backup_report.get("entries", []):
+        action = entry.get("action")
+        source_path = entry.get("path")
+        backup_target = Path(entry.get("backup_target", ""))
+        restore_target = rooted(root, source_path)
+
+        restorable = action in ("file_copied", "directory_copied") and backup_target.exists()
+
+        entries.append(
+            {
+                "path": source_path,
+                "backup_target": str(backup_target),
+                "restore_target": str(restore_target),
+                "backup_action": action,
+                "backup_exists": backup_target.exists(),
+                "restore_target_exists_now": restore_target.exists(),
+                "would_restore": restorable,
+            }
+        )
+
+    result = {
+        "schema": "lilhouse.router_restore_dry_run.v1",
+        "mode": "restore-dry-run",
+        "apply": False,
+        "copies_files": False,
+        "backup_dir": str(backup_dir),
+        "root": str(root),
+        "entries": entries,
+        "summary": {
+            "total": len(entries),
+            "would_restore": sum(1 for e in entries if e["would_restore"]),
+            "missing_from_backup": sum(1 for e in entries if not e["backup_exists"] and e["backup_action"] != "missing"),
+            "skipped_missing_sources": sum(1 for e in entries if e["backup_action"] == "missing"),
+        },
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
