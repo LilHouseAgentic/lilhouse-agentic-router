@@ -1996,4 +1996,47 @@ assert len(report["commands"]) == 3
 assert all(cmd["ok"] is True for cmd in report["commands"])
 PYJSON
 
+
+echo
+echo "== run easy installer VM acceptance mode =="
+
+EASY_WORK="$TMP_STATE/easy-install"
+EASY_JSON="$TMP_STATE/easy-install-report.json"
+
+set +e
+"$REPO_DIR/easy-install.sh" --vm --work-dir "$EASY_WORK" --out "$EASY_JSON" >"$TMP_STATE/easy-install-refuse-yes.out"
+EASY_NO_YES_RC=$?
+set -e
+test "$EASY_NO_YES_RC" -eq 2
+
+"$REPO_DIR/easy-install.sh" \
+  --vm \
+  --yes \
+  --wan eth0 \
+  --lan eth1 \
+  --work-dir "$EASY_WORK" \
+  --out "$EASY_JSON" >"$TMP_STATE/easy-install.out"
+
+python3 - "$EASY_JSON" <<'PYJSON'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text())
+assert report["schema"] == "lilhouse.router_vm_readiness_bundle.v1"
+assert report["ok"] is True
+assert report["safety"]["apply"] is False
+assert report["safety"]["live_changes"] is False
+assert report["safety"]["vm_only"] is True
+assert report["safety"]["vm_nic_bypass"] is True
+assert report["safety"]["vm_nic_bypass_valid_for_live"] is False
+assert report["safety"]["runs_live_orchestrator"] is False
+assert report["safety"]["plan_only_live_orchestrator"] is True
+assert report["summary"]["vm_bundle_complete"] is True
+assert report["summary"]["valid_for_live_router_approval"] is False
+assert report["summary"]["ready_for_live_apply"] is False
+assert report["summary"]["safe_to_apply_live"] is False
+assert report["summary"]["next_gate"] == "real-live-readiness-bundle-on-pi"
+PYJSON
+
 echo "Smoke test passed."
