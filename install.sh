@@ -200,6 +200,7 @@ backup_existing /usr/local/bin/lilhouse-router-apply-validate
 backup_existing /usr/local/bin/lilhouse-router-full-dress-rehearsal
 backup_existing /usr/local/bin/lilhouse-router-live-readiness
 backup_existing /usr/local/bin/lilhouse-router-timed-rollback-plan
+backup_existing /usr/local/bin/lilhouse-router-timed-rollback-create
 backup_existing /usr/local/bin/lilhouse-status
 backup_existing /etc/systemd/system/lilhouse-current-state.service
 backup_existing /etc/systemd/system/lilhouse-current-state.timer
@@ -234,6 +235,7 @@ install -m 0755 "$REPO_DIR/bin/lilhouse-router-apply-validate" "$(root_path /usr
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-full-dress-rehearsal" "$(root_path /usr/local/bin/lilhouse-router-full-dress-rehearsal)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-live-readiness" "$(root_path /usr/local/bin/lilhouse-router-live-readiness)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-timed-rollback-plan" "$(root_path /usr/local/bin/lilhouse-router-timed-rollback-plan)"
+install -m 0755 "$REPO_DIR/bin/lilhouse-router-timed-rollback-create" "$(root_path /usr/local/bin/lilhouse-router-timed-rollback-create)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-status" "$(root_path /usr/local/bin/lilhouse-status)"
 
 install -m 0644 "$REPO_DIR/systemd/lilhouse-current-state.service" "$(root_path /etc/systemd/system/lilhouse-current-state.service)"

@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Create timed rollback guard unit files in a non-live target root. Refuses live /."
+    )
+    parser.add_argument("rollback_plan", help="timed rollback plan JSON.")
+    parser.add_argument("--target-root", required=True, help="Non-live root to write rollback unit files into.")
+    parser.add_argument("--yes", action="store_true", help="Required confirmation flag.")
+    args = parser.parse_args()
+
+    plan_path = Path(args.rollback_plan).resolve()
+    target_root = Path(args.target_root).resolve()
+
+    if not args.yes:
+        print("ERROR: refusing to write rollback units without --yes", file=sys.stderr)
+        return 2
+
+    if str(target_root) == "/":
+        print("ERROR: refusing to write rollback units into live /", file=sys.stderr)
+        return 2
+
+    if not plan_path.is_file():
+        print(f"ERROR: rollback plan not found: {plan_path}", file=sys.stderr)
+        return 1
+
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    errors = []
+
+    if plan.get("schema") != "lilhouse.router_timed_rollback_plan.v1":
+        errors.append("input is not a timed rollback plan")
+    if plan.get("ok") is not True:
+        errors.append("timed rollback plan is not OK")
+    if plan.get("apply") is not False:
+        errors.append("timed rollback plan must be non-applying")
+    if plan.get("writes_files") is not False:
+        errors.append("timed rollback plan must declare writes_files false")
+
+    service_name = plan.get("service_plan", {}).get("unit_name", "lilhouse-router-rollback-guard.service")
+    timer_name = plan.get("timer_plan", {}).get("unit_name", "lilhouse-router-rollback-guard.timer")
+    backup_dir = plan.get("backup_dir")
+    rollback_root = plan.get("rollback_root", "/")
+    timeout = plan.get("timeout_minutes", 5)
+
+    if not backup_dir:
+        errors.append("rollback plan missing backup_dir")
+
+    systemd_dir = target_root / "etc/systemd/system"
+    service_path = systemd_dir / service_name
+    timer_path = systemd_dir / timer_name
+
+    if not errors:
+        systemd_dir.mkdir(parents=True, exist_ok=True)
+
+        service_text = f"""[Unit]
+Description=LilHouse router timed rollback guard
+Documentation=internal:lilhouse-router-timed-rollback
+ConditionPathExists={backup_dir}/backup-report.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/lilhouse-router-restore-create {backup_dir} --root {rollback_root} --yes
+"""
+        timer_text = f"""[Unit]
+Description=LilHouse router timed rollback guard timer
+Documentation=internal:lilhouse-router-timed-rollback
+
+[Timer]
+OnActiveSec={timeout}min
+Unit={service_name}
+Persistent=false
+
+[Install]
+WantedBy=timers.target
+"""
+
+        service_path.write_text(service_text, encoding="utf-8")
+        timer_path.write_text(timer_text, encoding="utf-8")
+
+    written = [
+        {
+            "relative_path": f"etc/systemd/system/{service_name}",
+            "path": str(service_path),
+            "exists": service_path.is_file(),
+        },
+        {
+            "relative_path": f"etc/systemd/system/{timer_name}",
+            "path": str(timer_path),
+            "exists": timer_path.is_file(),
+        },
+    ]
+
+    if not errors:
+        for item in written:
+            if not item["exists"]:
+                errors.append(f"expected rollback unit was not written: {item['relative_path']}")
+
+    result = {
+        "schema": "lilhouse.router_timed_rollback_create.v1",
+        "mode": "timed-rollback-create",
+        "apply": True,
+        "live_changes": False,
+        "live_root_allowed": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "rollback_plan": str(plan_path),
+        "target_root": str(target_root),
+        "ok": not errors,
+        "error_count": len(errors),
+        "errors": errors,
+        "written_count": sum(1 for item in written if item["exists"]),
+        "written": written,
+        "summary": {
+            "service_unit": service_name,
+            "timer_unit": timer_name,
+            "timeout_minutes": timeout,
+            "requires_health_check_cancel": True,
+            "safe_to_apply_live": False,
+        },
+    }
+
+    report_path = target_root / "timed-rollback-create-report.json"
+    report_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
