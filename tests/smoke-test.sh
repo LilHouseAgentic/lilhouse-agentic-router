@@ -141,7 +141,8 @@ echo "== run installer router-deploy dry-run wizard =="
 
 WIZARD_OUT="$TMP_STATE/install-router-wizard"
 WIZARD_LOG="$TMP_STATE/install-router-wizard.out"
-./install.sh --mode router-deploy --wizard --dry-run --out-dir "$WIZARD_OUT" >"$WIZARD_LOG"
+ROUTER_WIZARD_WAN=eth0 ROUTER_WIZARD_LAN=eth1 \
+  ./install.sh --mode router-deploy --wizard --dry-run --out-dir "$WIZARD_OUT" >"$WIZARD_LOG"
 
 test -f "$WIZARD_OUT/interface-report.json"
 test -f "$WIZARD_OUT/router-plan.json"

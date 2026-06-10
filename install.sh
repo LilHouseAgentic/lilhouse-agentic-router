@@ -77,15 +77,59 @@ done
 if [ "$MODE" = "router-deploy" ]; then
   if [ "$WIZARD" -eq 1 ] && [ "$DRY_RUN" -eq 1 ]; then
     OUT="${ROUTER_WIZARD_OUT_DIR:-${LILHOUSE_STATE_DIR:-./state}/router-wizard-dry-run}"
-    WIZARD_WAN="${ROUTER_WIZARD_WAN:-eth0}"
-    WIZARD_LAN="${ROUTER_WIZARD_LAN:-eth1}"
     echo "Router-deploy dry-run wizard requested."
     echo
     echo "No system changes will be made."
-    echo "Preview interfaces: WAN=$WIZARD_WAN LAN=$WIZARD_LAN"
     echo
-    "$REPO_DIR/bin/lilhouse-router-wizard" --out-dir "$OUT" --wan "$WIZARD_WAN" --lan "$WIZARD_LAN"
-    exit $?
+
+    if [ -n "${ROUTER_WIZARD_WAN:-}" ] || [ -n "${ROUTER_WIZARD_LAN:-}" ]; then
+      if [ -z "${ROUTER_WIZARD_WAN:-}" ] || [ -z "${ROUTER_WIZARD_LAN:-}" ]; then
+        echo "Both ROUTER_WIZARD_WAN and ROUTER_WIZARD_LAN must be set when using interface overrides."
+        exit 2
+      fi
+
+      echo "Preview interfaces: WAN=$ROUTER_WIZARD_WAN LAN=$ROUTER_WIZARD_LAN"
+      echo
+      "$REPO_DIR/bin/lilhouse-router-wizard" --out-dir "$OUT" --wan "$ROUTER_WIZARD_WAN" --lan "$ROUTER_WIZARD_LAN"
+      exit $?
+    fi
+
+    while true; do
+      set +e
+      "$REPO_DIR/bin/lilhouse-router-wizard" --out-dir "$OUT"
+      WIZARD_RC=$?
+      set -e
+
+      if [ "$WIZARD_RC" -eq 0 ]; then
+        exit 0
+      fi
+
+      echo
+      echo "Router wizard could not detect both WAN and LAN interfaces."
+      echo
+      echo "Please attach another network adapter, then press Enter to check again."
+      echo "Type q and press Enter to quit."
+      echo
+
+      if [ ! -t 0 ]; then
+        echo "No interactive terminal available; cannot wait for NIC retry."
+        exit "$WIZARD_RC"
+      fi
+
+      printf "Continue after adding NIC? [Enter/q]: "
+      read -r ANSWER
+
+      case "$ANSWER" in
+        q|Q|quit|QUIT)
+          echo "Router-deploy dry-run wizard cancelled."
+          exit "$WIZARD_RC"
+          ;;
+      esac
+
+      echo
+      echo "Rechecking interfaces..."
+      echo
+    done
   fi
 
   echo "Router-deploy apply mode is planned but not implemented yet."
