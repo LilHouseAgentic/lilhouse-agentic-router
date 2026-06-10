@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+python3 - "$@" <<'PY'
+import argparse
+import ipaddress
+import json
+import socket
+import sys
+from datetime import datetime, timezone
+
+parser = argparse.ArgumentParser(
+    description="Generate a LilHouse router deployment plan. This does not apply changes."
+)
+
+parser.add_argument("--wan", required=True, help="WAN interface name")
+parser.add_argument("--lan", required=True, help="LAN interface name")
+parser.add_argument("--lan-ip", required=True, help="Router LAN IP address")
+parser.add_argument("--subnet", required=True, help="LAN subnet in CIDR form")
+parser.add_argument("--dhcp-start", default="", help="DHCP range start")
+parser.add_argument("--dhcp-end", default="", help="DHCP range end")
+parser.add_argument("--dns-mode", default="pihole-unbound", choices=["pihole-unbound", "system"], help="DNS deployment mode")
+parser.add_argument("--enable-cake", action="store_true", help="Plan CAKE/SQM setup")
+parser.add_argument("--enable-ipv6", action="store_true", help="Plan IPv6 forwarding where available")
+parser.add_argument("--output", default="", help="Optional file to write the JSON plan")
+
+args = parser.parse_args()
+
+errors = []
+warnings = []
+
+if args.wan == args.lan:
+    errors.append("WAN and LAN interfaces must be different.")
+
+try:
+    subnet = ipaddress.ip_network(args.subnet, strict=False)
+except ValueError as exc:
+    errors.append(f"Invalid subnet: {exc}")
+    subnet = None
+
+try:
+    lan_ip = ipaddress.ip_address(args.lan_ip)
+except ValueError as exc:
+    errors.append(f"Invalid LAN IP: {exc}")
+    lan_ip = None
+
+if subnet is not None and lan_ip is not None and lan_ip not in subnet:
+    errors.append("LAN IP must be inside the LAN subnet.")
+
+for label, value in [("dhcp_start", args.dhcp_start), ("dhcp_end", args.dhcp_end)]:
+    if value:
+        try:
+            ip = ipaddress.ip_address(value)
+            if subnet is not None and ip not in subnet:
+                errors.append(f"{label} must be inside the LAN subnet.")
+        except ValueError as exc:
+            errors.append(f"Invalid {label}: {exc}")
+
+if bool(args.dhcp_start) != bool(args.dhcp_end):
+    errors.append("Both --dhcp-start and --dhcp-end must be provided together.")
+
+plan = {
+    "schema": "lilhouse.router_plan.v1",
+    "generated_at": datetime.now(timezone.utc).astimezone().isoformat(),
+    "host": socket.gethostname(),
+    "apply": False,
+    "mode": "router-deploy-plan-only",
+    "summary": "Plan only. No system changes are made.",
+    "inputs": {
+        "wan_interface": args.wan,
+        "lan_interface": args.lan,
+        "lan_ip": args.lan_ip,
+        "subnet": args.subnet,
+        "dhcp_start": args.dhcp_start,
+        "dhcp_end": args.dhcp_end,
+        "dns_mode": args.dns_mode,
+        "enable_cake": args.enable_cake,
+        "enable_ipv6": args.enable_ipv6,
+    },
+    "validation": {
+        "ok": not errors,
+        "errors": errors,
+        "warnings": warnings,
+    },
+    "planned_modules": [
+        {
+            "name": "interface_detection",
+            "intent": "Confirm WAN and LAN interfaces exist before applying router configuration.",
+            "risk": "low",
+            "apply_status": "not_implemented",
+        },
+        {
+            "name": "lan_static_address",
+            "intent": "Configure the LAN interface with the requested static router address.",
+            "risk": "high",
+            "apply_status": "not_implemented",
+        },
+        {
+            "name": "forwarding",
+            "intent": "Enable packet forwarding for router operation.",
+            "risk": "high",
+            "apply_status": "not_implemented",
+        },
+        {
+            "name": "firewall_nat",
+            "intent": "Create a baseline firewall and outbound sharing rules.",
+            "risk": "high",
+            "apply_status": "not_implemented",
+        },
+        {
+            "name": "dns",
+            "intent": "Configure the selected DNS mode.",
+            "risk": "medium",
+            "apply_status": "not_implemented",
+        },
+        {
+            "name": "dhcp",
+            "intent": "Configure DHCP service for LAN clients if requested.",
+            "risk": "medium",
+            "apply_status": "not_implemented",
+        },
+        {
+            "name": "worker_timers",
+            "intent": "Enable LilHouse observe and health workers.",
+            "risk": "low",
+            "apply_status": "observe_only_available",
+        },
+    ],
+}
+
+if args.enable_cake:
+    plan["planned_modules"].append({
+        "name": "cake_sqm",
+        "intent": "Plan CAKE/SQM setup for latency control.",
+        "risk": "medium",
+        "apply_status": "not_implemented",
+    })
+
+if args.enable_ipv6:
+    plan["planned_modules"].append({
+        "name": "ipv6_forwarding",
+        "intent": "Plan IPv6 forwarding where the upstream provides IPv6.",
+        "risk": "medium",
+        "apply_status": "not_implemented",
+    })
+
+text = json.dumps(plan, indent=2, sort_keys=True) + "\n"
+
+if args.output:
+    with open(args.output, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    print(args.output)
+else:
+    print(text, end="")
+
+sys.exit(0 if not errors else 2)
+PY
