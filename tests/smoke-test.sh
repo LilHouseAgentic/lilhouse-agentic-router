@@ -163,4 +163,17 @@ grep -q "LILHOUSE_CAKE_WAN=eth0" "$CAKE_WIZARD_OUT/preview/etc/lilhouse/cake.env
 grep -q "LILHOUSE_CAKE_IFB=ifb0" "$CAKE_WIZARD_OUT/preview/etc/lilhouse/cake.env"
 grep -q "LILHOUSE_CAKE_QDISC=cake" "$CAKE_WIZARD_OUT/preview/etc/lilhouse/cake.env"
 
+IPV6_WIZARD_OUT="$TMP_STATE/install-router-wizard-ipv6"
+"$REPO_DIR/bin/lilhouse-router-wizard" \
+  --out-dir "$IPV6_WIZARD_OUT" \
+  --wan eth0 \
+  --lan eth1 \
+  --enable-ipv6 >/dev/null
+
+test -f "$IPV6_WIZARD_OUT/preview/etc/lilhouse/ipv6-plan.env"
+grep -q "net.ipv6.conf.all.forwarding=1" "$IPV6_WIZARD_OUT/preview/etc/sysctl.d/90-lilhouse-router-forwarding.conf"
+grep -q "LILHOUSE_IPV6_ENABLED=true" "$IPV6_WIZARD_OUT/preview/etc/lilhouse/ipv6-plan.env"
+grep -q "LILHOUSE_IPV6_NAT66=false" "$IPV6_WIZARD_OUT/preview/etc/lilhouse/ipv6-plan.env"
+grep -q "LILHOUSE_IPV6_INBOUND_SSH=explicit_opt_in_only" "$IPV6_WIZARD_OUT/preview/etc/lilhouse/ipv6-plan.env"
+
 echo "Smoke test passed."
