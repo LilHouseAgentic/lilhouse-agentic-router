@@ -24,6 +24,7 @@ rm -f /usr/local/bin/lilhouse-action
 rm -f /usr/local/bin/lilhouse-current-state
 rm -f /usr/local/bin/lilhouse-storage-health
 rm -f /usr/local/bin/lilhouse-router-plan
+rm -f /usr/local/bin/lilhouse-router-plan-summary
 rm -f /usr/local/bin/lilhouse-status
 rm -f /usr/lib/lilhouse/lilhouse-common.sh
 
