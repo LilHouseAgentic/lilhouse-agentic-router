@@ -162,6 +162,8 @@ grep -q "LAN interface: eth1" "$WIZARD_OUT/preview/MANIFEST.txt"
 grep -q "LAN address: 10.23.0.1/24" "$WIZARD_OUT/preview/MANIFEST.txt"
 grep -q "etc/nftables.conf" "$WIZARD_OUT/preview/MANIFEST.txt"
 grep -q "etc/unbound/unbound.conf.d/lilhouse.conf" "$WIZARD_OUT/preview/MANIFEST.txt"
+grep -q "ROLLBACK-NOTES.txt" "$WIZARD_OUT/preview/MANIFEST.txt"
+grep -q "VALIDATION-CHECKLIST.txt" "$WIZARD_OUT/preview/MANIFEST.txt"
 
 grep -q "LilHouse router deploy rollback preview" "$WIZARD_OUT/preview/ROLLBACK-NOTES.txt"
 grep -q "Future apply mode must back up" "$WIZARD_OUT/preview/ROLLBACK-NOTES.txt"

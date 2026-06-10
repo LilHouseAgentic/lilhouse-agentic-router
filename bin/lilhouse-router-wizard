@@ -392,24 +392,6 @@ EOF
 
 MANIFEST_FILE="$PREVIEW_ROOT/MANIFEST.txt"
 
-{
-  echo "LilHouse router deploy preview manifest"
-  echo
-  echo "This directory contains generated preview files only."
-  echo "No files here have been written to the live system."
-  echo
-  echo "WAN interface: $WAN"
-  echo "LAN interface: $LAN"
-  echo "LAN address: $LAN_IP/$LAN_PREFIX"
-  echo "LAN subnet: $SUBNET"
-  echo "DHCP range: $DHCP_START - $DHCP_END"
-  echo "Enable CAKE: $ENABLE_CAKE"
-  echo "Enable IPv6: $ENABLE_IPV6"
-  echo
-  echo "Generated files:"
-  find "$PREVIEW_ROOT" -type f | sed "s#^$PREVIEW_ROOT/##" | sort | sed "s#^#- #"
-} >"$MANIFEST_FILE"
-
 ROLLBACK_FILE="$PREVIEW_ROOT/ROLLBACK-NOTES.txt"
 
 cat >"$ROLLBACK_FILE" <<EOF
@@ -485,6 +467,24 @@ Safety checks:
 Live router safety rule:
 Dry-run may generate files. Apply mode must validate, back up, stage, test, and only then activate.
 EOF
+
+{
+  echo "LilHouse router deploy preview manifest"
+  echo
+  echo "This directory contains generated preview files only."
+  echo "No files here have been written to the live system."
+  echo
+  echo "WAN interface: $WAN"
+  echo "LAN interface: $LAN"
+  echo "LAN address: $LAN_IP/$LAN_PREFIX"
+  echo "LAN subnet: $SUBNET"
+  echo "DHCP range: $DHCP_START - $DHCP_END"
+  echo "Enable CAKE: $ENABLE_CAKE"
+  echo "Enable IPv6: $ENABLE_IPV6"
+  echo
+  echo "Generated files:"
+  find "$PREVIEW_ROOT" -type f | sed "s#^$PREVIEW_ROOT/##" | sort | sed "s#^#- #"
+} >"$MANIFEST_FILE"
 
 echo "LilHouse router wizard plan generated."
 echo
