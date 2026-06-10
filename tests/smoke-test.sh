@@ -41,6 +41,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-full-dress-rehearsal"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-readiness"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-timed-rollback-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-timed-rollback-create"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-timed-rollback-validate"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -520,6 +521,22 @@ assert data["live_root_allowed"] is False
 assert data["ok"] is True
 assert data["written_count"] == 2
 assert data["summary"]["requires_health_check_cancel"] is True
+assert data["summary"]["safe_to_apply_live"] is False
+PYJSON
+
+"$REPO_DIR/bin/lilhouse-router-timed-rollback-validate" "$ROLLBACK_UNIT_ROOT" >"$TMP_STATE/router-timed-rollback-validate.json"
+python3 -m json.tool "$TMP_STATE/router-timed-rollback-validate.json" >/dev/null
+
+python3 - "$TMP_STATE/router-timed-rollback-validate.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_timed_rollback_validate.v1"
+assert data["apply"] is False
+assert data["live_changes"] is False
+assert data["live_root_allowed"] is False
+assert data["ok"] is True
+assert data["error_count"] == 0
+assert data["summary"]["checks_passed"] == data["summary"]["checks_total"]
 assert data["summary"]["safe_to_apply_live"] is False
 PYJSON
 

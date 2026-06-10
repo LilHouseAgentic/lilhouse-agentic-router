@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+SERVICE_NAME = "lilhouse-router-rollback-guard.service"
+TIMER_NAME = "lilhouse-router-rollback-guard.timer"
+
+
+def read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Validate non-live timed rollback guard unit files."
+    )
+    parser.add_argument("target_root", help="Non-live root containing rollback guard unit files.")
+    args = parser.parse_args()
+
+    target_root = Path(args.target_root).resolve()
+
+    if str(target_root) == "/":
+        print("ERROR: refusing to validate live / rollback units", file=sys.stderr)
+        return 2
+
+    if not target_root.is_dir():
+        print(f"ERROR: target root not found: {target_root}", file=sys.stderr)
+        return 1
+
+    report_path = target_root / "timed-rollback-create-report.json"
+    service_path = target_root / "etc/systemd/system" / SERVICE_NAME
+    timer_path = target_root / "etc/systemd/system" / TIMER_NAME
+
+    checks = []
+    errors = []
+
+    def check(name, ok, detail):
+        checks.append({"name": name, "ok": bool(ok), "detail": detail})
+        if not ok:
+            errors.append(f"{name}: {detail}")
+
+    check("create_report_exists", report_path.is_file(), str(report_path))
+    check("service_exists", service_path.is_file(), str(service_path))
+    check("timer_exists", timer_path.is_file(), str(timer_path))
+
+    create_report = None
+    if report_path.is_file():
+        try:
+            create_report = json.loads(report_path.read_text(encoding="utf-8"))
+            check("create_report_json", True, "valid JSON")
+        except Exception as exc:
+            check("create_report_json", False, str(exc))
+
+    if create_report:
+        check(
+            "create_report_schema",
+            create_report.get("schema") == "lilhouse.router_timed_rollback_create.v1",
+            "schema must match lilhouse.router_timed_rollback_create.v1",
+        )
+        check("create_report_ok", create_report.get("ok") is True, "create report must be OK")
+        check("create_report_non_live", create_report.get("live_changes") is False, "must be non-live")
+        check("create_report_live_root_blocked", create_report.get("live_root_allowed") is False, "live root must be blocked")
+        check("create_report_written_count", create_report.get("written_count") == 2, "must write service + timer")
+
+    if service_path.is_file():
+        service_text = read_text(service_path)
+        check("service_unit_section", "[Unit]" in service_text, "service must contain [Unit]")
+        check("service_service_section", "[Service]" in service_text, "service must contain [Service]")
+        check("service_oneshot", "Type=oneshot" in service_text, "service must be oneshot")
+        check("service_restore_tool", "lilhouse-router-restore-create" in service_text, "service must call restore tool")
+        check("service_backup_condition", "ConditionPathExists=" in service_text and "backup-report.json" in service_text, "service must require backup report")
+
+    if timer_path.is_file():
+        timer_text = read_text(timer_path)
+        check("timer_unit_section", "[Unit]" in timer_text, "timer must contain [Unit]")
+        check("timer_timer_section", "[Timer]" in timer_text, "timer must contain [Timer]")
+        check("timer_install_section", "[Install]" in timer_text, "timer must contain [Install]")
+        check("timer_on_active", "OnActiveSec=" in timer_text, "timer must define OnActiveSec")
+        check("timer_links_service", f"Unit={SERVICE_NAME}" in timer_text, "timer must link rollback service")
+        check("timer_not_persistent", "Persistent=false" in timer_text, "timer should not be persistent")
+
+    result = {
+        "schema": "lilhouse.router_timed_rollback_validate.v1",
+        "mode": "timed-rollback-validate",
+        "apply": False,
+        "live_changes": False,
+        "live_root_allowed": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "target_root": str(target_root),
+        "ok": not errors,
+        "error_count": len(errors),
+        "errors": errors,
+        "checks": checks,
+        "summary": {
+            "service_unit": SERVICE_NAME,
+            "timer_unit": TIMER_NAME,
+            "checks_passed": sum(1 for c in checks if c["ok"]),
+            "checks_total": len(checks),
+            "safe_to_apply_live": False,
+        },
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
