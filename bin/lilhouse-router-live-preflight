@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+RECOVERY_ACK_PHRASE = "I have local console access and accept temporary network interruption"
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def load_json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception as e:
+        raise SystemExit(f"failed to read JSON {path}: {e}")
+
+
+def nested(data, *keys, default=None):
+    cur = data
+    for key in keys:
+        if not isinstance(cur, dict) or key not in cur:
+            return default
+        cur = cur[key]
+    return cur
+
+
+def boolish(value):
+    return value is True
+
+
+def release_candidate_ok(report):
+    summary = report.get("summary", {})
+    safety = report.get("safety", {})
+
+    checks_passed = summary.get("checks_passed")
+    checks_total = summary.get("checks_total")
+
+    if report.get("ok") is True:
+        base_ok = True
+    elif isinstance(checks_passed, int) and isinstance(checks_total, int):
+        base_ok = checks_total > 0 and checks_passed == checks_total
+    else:
+        base_ok = summary.get("status") == "PASS"
+
+    non_live_proven = (
+        summary.get("non_live_pipeline_proven") is True
+        or report.get("non_live_pipeline_proven") is True
+    )
+
+    no_apply = safety.get("apply") is False or summary.get("apply") is False
+    no_live_changes = safety.get("live_changes") is False or summary.get("live_changes") is False
+    no_copies = safety.get("copies_files") is False or summary.get("copies_files") is False
+    no_services = safety.get("runs_services") is False or summary.get("runs_services") is False
+
+    ready_for_live_apply = (
+        summary.get("ready_for_live_apply") is True
+        or report.get("ready_for_live_apply") is True
+    )
+    safe_to_apply_live = (
+        summary.get("safe_to_apply_live") is True
+        or report.get("safe_to_apply_live") is True
+    )
+
+    return {
+        "release_candidate_passed": base_ok,
+        "non_live_pipeline_proven": non_live_proven,
+        "release_candidate_does_not_apply": no_apply,
+        "release_candidate_has_no_live_changes": no_live_changes,
+        "release_candidate_copies_no_files": no_copies,
+        "release_candidate_runs_no_services": no_services,
+        "release_candidate_still_blocks_live_apply": not ready_for_live_apply and not safe_to_apply_live,
+    }
+
+
+def health_probe_ok(report):
+    safety = report.get("safety", {})
+    hard = report.get("hard_checks", {})
+    probes = report.get("probes", {})
+    interfaces = probes.get("interfaces", {})
+
+    return {
+        "health_probe_passed": report.get("ok") is True,
+        "health_probe_reads_live_state": safety.get("reads_live_state") is True,
+        "health_probe_does_not_apply": safety.get("apply") is False,
+        "health_probe_has_no_live_changes": safety.get("live_changes") is False,
+        "health_probe_copies_no_files": safety.get("copies_files") is False,
+        "health_probe_runs_no_services": safety.get("runs_services") is False,
+        "health_probe_writes_no_config": safety.get("writes_config") is False,
+        "wan_present": hard.get("wan_present") is True or interfaces.get("wan_present") is True,
+        "lan_present": hard.get("lan_present") is True or interfaces.get("lan_present") is True,
+        "dns_resolution_ok": hard.get("dns_resolution") is True,
+        "wan_ping_ok": hard.get("wan_ping") is True,
+    }
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Live preflight gate for LilHouse router install.")
+    ap.add_argument("--health-probe-report", required=True)
+    ap.add_argument("--release-candidate-report", required=True)
+    ap.add_argument("--recovery-ack", default="")
+    ap.add_argument("--out", default="")
+    args = ap.parse_args()
+
+    health = load_json(args.health_probe_report)
+    release_candidate = load_json(args.release_candidate_report)
+
+    recovery_ack_ok = args.recovery_ack == RECOVERY_ACK_PHRASE
+
+    checks = {}
+    checks.update(health_probe_ok(health))
+    checks.update(release_candidate_ok(release_candidate))
+    checks["recovery_acknowledged"] = recovery_ack_ok
+    checks["rollback_required_before_apply"] = True
+    checks["live_backup_required_before_apply"] = True
+
+    ready_for_live_backup = all([
+        checks["health_probe_passed"],
+        checks["health_probe_reads_live_state"],
+        checks["health_probe_does_not_apply"],
+        checks["health_probe_has_no_live_changes"],
+        checks["health_probe_copies_no_files"],
+        checks["health_probe_runs_no_services"],
+        checks["health_probe_writes_no_config"],
+        checks["wan_present"],
+        checks["lan_present"],
+        checks["dns_resolution_ok"],
+        checks["wan_ping_ok"],
+        checks["release_candidate_passed"],
+        checks["non_live_pipeline_proven"],
+        checks["release_candidate_does_not_apply"],
+        checks["release_candidate_has_no_live_changes"],
+        checks["release_candidate_copies_no_files"],
+        checks["release_candidate_runs_no_services"],
+        checks["release_candidate_still_blocks_live_apply"],
+        checks["recovery_acknowledged"],
+        checks["rollback_required_before_apply"],
+        checks["live_backup_required_before_apply"],
+    ])
+
+    failed = [name for name, ok in checks.items() if ok is not True]
+
+    report = {
+        "schema": "lilhouse.router_live_preflight.v1",
+        "ok": ready_for_live_backup,
+        "generated_at": now_iso(),
+        "mode": "live-preflight-read-only",
+        "inputs": {
+            "health_probe_report": str(Path(args.health_probe_report)),
+            "release_candidate_report": str(Path(args.release_candidate_report)),
+            "recovery_ack_phrase_required": RECOVERY_ACK_PHRASE,
+            "recovery_acknowledged": recovery_ack_ok,
+        },
+        "safety": {
+            "apply": False,
+            "live_changes": False,
+            "copies_files": False,
+            "runs_services": False,
+            "writes_config": False,
+            "reads_live_state": False,
+            "reads_reports_only": True,
+        },
+        "checks": checks,
+        "failed_checks": failed,
+        "summary": {
+            "ready_for_live_backup": ready_for_live_backup,
+            "ready_for_live_apply": False,
+            "safe_to_apply_live": False,
+            "next_gate": "live-backup",
+            "rollback_must_be_armed_before_live_changes": True,
+        },
+    }
+
+    text = json.dumps(report, indent=2, sort_keys=True)
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(text + "\n", encoding="utf-8")
+    print(text)
+    return 0 if ready_for_live_backup else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

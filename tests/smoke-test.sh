@@ -1292,4 +1292,56 @@ assert report["summary"]["safe_to_apply_live"] is False
 assert report["summary"]["safe_to_cancel_rollback"] is False
 PYJSON
 
+
+echo
+echo "== run live preflight command against safe reports =="
+
+LIVE_PREFLIGHT_RC="$TMP_STATE/live-preflight-release-candidate.json"
+cat > "$LIVE_PREFLIGHT_RC" <<'JSON'
+{
+  "schema": "lilhouse.router_release_candidate.v1",
+  "ok": true,
+  "summary": {
+    "checks_passed": 12,
+    "checks_total": 12,
+    "non_live_pipeline_proven": true,
+    "ready_for_live_apply": false,
+    "safe_to_apply_live": false
+  },
+  "safety": {
+    "apply": false,
+    "live_changes": false,
+    "copies_files": false,
+    "runs_services": false
+  }
+}
+JSON
+
+LIVE_PREFLIGHT_JSON="$TMP_STATE/live-preflight.json"
+
+"$REPO_DIR/bin/lilhouse-router-live-preflight" \
+  --health-probe-report "$HEALTH_PROBE_RUN_JSON" \
+  --release-candidate-report "$LIVE_PREFLIGHT_RC" \
+  --recovery-ack "I have local console access and accept temporary network interruption" \
+  --out "$LIVE_PREFLIGHT_JSON" >/dev/null
+
+python3 - "$LIVE_PREFLIGHT_JSON" <<'PYJSON'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text())
+assert report["schema"] == "lilhouse.router_live_preflight.v1"
+assert report["ok"] is True
+assert report["safety"]["apply"] is False
+assert report["safety"]["live_changes"] is False
+assert report["safety"]["copies_files"] is False
+assert report["safety"]["runs_services"] is False
+assert report["safety"]["writes_config"] is False
+assert report["summary"]["ready_for_live_backup"] is True
+assert report["summary"]["ready_for_live_apply"] is False
+assert report["summary"]["safe_to_apply_live"] is False
+assert report["summary"]["next_gate"] == "live-backup"
+PYJSON
+
 echo "Smoke test passed."
