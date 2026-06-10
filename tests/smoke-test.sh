@@ -1043,6 +1043,8 @@ assert data["summary"]["safe_to_apply_live"] is False
 blockers = {item["id"]: item for item in data["remaining_blockers"]}
 assert blockers["real_health_probe_executor"]["status"] == "probe_rehearsal_proven"
 assert blockers["real_health_probe_executor"]["severity"] == "high"
+assert blockers["real_service_activation_executor"]["status"] == "service_rehearsal_proven"
+assert blockers["real_service_activation_executor"]["severity"] == "high"
 PYJSON
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"

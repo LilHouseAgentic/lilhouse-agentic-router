@@ -154,9 +154,9 @@ def main() -> int:
         },
         {
             "id": "real_service_activation_executor",
-            "severity": "critical",
-            "status": "missing",
-            "detail": "service activation order is rehearsed only; no live executor is allowed yet.",
+            "severity": "high" if service.get("ok") is True else "critical",
+            "status": "service_rehearsal_proven" if service.get("ok") is True else "missing",
+            "detail": "service activation plan/dry-run/rehearsal is proven; real live service executor still does not execute yet." if service.get("ok") is True else "service activation order is rehearsed only; no live executor is allowed yet.",
         },
         {
             "id": "live_apply_root_copy_executor",
