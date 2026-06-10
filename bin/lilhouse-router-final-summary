@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+EXPECTED_SCHEMAS = {
+    "live_backup": "lilhouse.router_live_backup.v1",
+    "rollback_guard": "lilhouse.router_rollback_guard.v1",
+    "rollback_start": "lilhouse.router_rollback_start.v1",
+    "live_config_copy": "lilhouse.router_live_config_copy.v1",
+    "service_activation": "lilhouse.router_service_activation.v1",
+    "post_apply_health": "lilhouse.router_post_apply_health.v1",
+    "rollback_cancel": "lilhouse.router_rollback_cancel.v1",
+}
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def load_json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8")), None
+    except Exception as e:
+        return None, str(e)
+
+def parse_report_arg(value):
+    if "=" not in value:
+        raise argparse.ArgumentTypeError("report must be name=/path/to/report.json")
+    name, path = value.split("=", 1)
+    name = name.strip()
+    path = path.strip()
+    if not name or not path:
+        raise argparse.ArgumentTypeError("report must be name=/path/to/report.json")
+    return name, path
+
+
+def summarize_report(name, path):
+    data, error = load_json(path)
+    if data is None:
+        return {
+            "name": name,
+            "path": path,
+            "ok": False,
+            "readable": False,
+            "schema": None,
+            "expected_schema": EXPECTED_SCHEMAS.get(name),
+            "schema_ok": False,
+            "error": error,
+            "summary": {},
+        }
+
+    schema = data.get("schema")
+    expected_schema = EXPECTED_SCHEMAS.get(name)
+    schema_ok = True if expected_schema is None else schema == expected_schema
+
+    return {
+        "name": name,
+        "path": path,
+        "ok": data.get("ok") is True and schema_ok,
+        "readable": True,
+        "schema": schema,
+        "expected_schema": expected_schema,
+        "schema_ok": schema_ok,
+        "error": None,
+        "summary": data.get("summary", {}),
+        "safety": data.get("safety", {}),
+    }
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Summarize the guarded router deployment report chain.")
+    ap.add_argument("--report", action="append", type=parse_report_arg, required=True, help="Repeatable: name=/path/to/report.json")
+    ap.add_argument("--out", default="")
+    args = ap.parse_args()
+
+    reports = [summarize_report(name, path) for name, path in args.report]
+
+    by_name = {r["name"]: r for r in reports}
+    failed = [r for r in reports if not r["ok"]]
+
+    required_final = [
+        "live_backup",
+        "rollback_guard",
+        "rollback_start",
+        "live_config_copy",
+        "service_activation",
+        "post_apply_health",
+        "rollback_cancel",
+    ]
+
+    missing_required = [name for name in required_final if name not in by_name]
+
+    rollback_cancel = by_name.get("rollback_cancel", {})
+    rollback_cancel_summary = rollback_cancel.get("summary", {})
+
+    post_apply = by_name.get("post_apply_health", {})
+    post_apply_summary = post_apply.get("summary", {})
+
+    blockers = []
+
+    for item in failed:
+        if not item["readable"]:
+            blockers.append(f"{item['name']}: unreadable report: {item['error']}")
+        elif not item["schema_ok"]:
+            blockers.append(f"{item['name']}: schema mismatch {item['schema']} != {item['expected_schema']}")
+        else:
+            blockers.append(f"{item['name']}: report not OK")
+
+    for name in missing_required:
+        blockers.append(f"{name}: missing required final-chain report")
+
+    if post_apply_summary.get("ready_for_rollback_cancel") is not True:
+        blockers.append("post_apply_health: did not approve rollback cancellation")
+
+    if rollback_cancel_summary.get("rollback_cancelled") is not True:
+        blockers.append("rollback_cancel: rollback was not cancelled")
+
+    if rollback_cancel_summary.get("router_live_apply_complete") is not True:
+        blockers.append("rollback_cancel: router live apply not marked complete")
+
+    complete = len(blockers) == 0
+
+    report = {
+        "schema": "lilhouse.router_final_summary.v1",
+        "ok": complete,
+        "generated_at": now_iso(),
+        "mode": "final-summary",
+        "safety": {
+            "apply": False,
+            "live_changes": False,
+            "copies_files": False,
+            "writes_config": False,
+            "runs_services": False,
+            "starts_router_services": False,
+            "restarts_network": False,
+            "touches_network_runtime": False,
+            "touches_firewall_runtime": False,
+            "touches_dns_runtime": False,
+            "touches_dhcp_runtime": False,
+            "touches_cake_runtime": False,
+            "cancels_rollback": False,
+            "reads_reports_only": True,
+        },
+        "summary": {
+            "gate_count": len(reports),
+            "passed_count": len([r for r in reports if r["ok"]]),
+            "failed_count": len(failed),
+            "missing_required_count": len(missing_required),
+            "router_deployment_complete": complete,
+            "rollback_cancelled": rollback_cancel_summary.get("rollback_cancelled") is True,
+            "safe_to_leave_live_state": rollback_cancel_summary.get("safe_to_leave_live_state") is True,
+            "ready_for_live_apply": False,
+            "safe_to_apply_live": False,
+            "next_gate": "operator-review",
+        },
+        "blockers": blockers,
+        "reports": reports,
+    }
+
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["ok"] else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1713,4 +1713,62 @@ assert report["summary"]["safe_to_apply_live"] is False
 assert report["summary"]["next_gate"] == "final-summary"
 PYJSON
 
+
+echo
+echo "== run final deployment summary =="
+
+FINAL_SUMMARY_JSON="$TMP_STATE/final-summary.json"
+
+set +e
+"$REPO_DIR/bin/lilhouse-router-final-summary" \
+  --report live_backup="$LIVE_BACKUP_DIR/missing-report.json" >"$TMP_STATE/final-summary-refusal.json"
+FINAL_SUMMARY_REFUSAL_RC=$?
+set -e
+test "$FINAL_SUMMARY_REFUSAL_RC" -eq 2
+
+"$REPO_DIR/bin/lilhouse-router-final-summary" \
+  --report live_backup="$LIVE_BACKUP_DIR/live-backup-report.json" \
+  --report rollback_guard="$ROLLBACK_GUARD_JSON" \
+  --report rollback_start="$ROLLBACK_START_JSON" \
+  --report live_config_copy="$LIVE_CONFIG_COPY_JSON" \
+  --report service_activation="$SERVICE_ACTIVATION_JSON" \
+  --report post_apply_health="$POST_APPLY_HEALTH_JSON" \
+  --report rollback_cancel="$ROLLBACK_CANCEL_JSON" \
+  --out "$FINAL_SUMMARY_JSON" >"$TMP_STATE/final-summary.out"
+
+python3 - "$FINAL_SUMMARY_JSON" <<'PYJSON'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text())
+assert report["schema"] == "lilhouse.router_final_summary.v1"
+assert report["ok"] is True
+assert report["safety"]["apply"] is False
+assert report["safety"]["live_changes"] is False
+assert report["safety"]["copies_files"] is False
+assert report["safety"]["writes_config"] is False
+assert report["safety"]["runs_services"] is False
+assert report["safety"]["starts_router_services"] is False
+assert report["safety"]["restarts_network"] is False
+assert report["safety"]["touches_network_runtime"] is False
+assert report["safety"]["touches_firewall_runtime"] is False
+assert report["safety"]["touches_dns_runtime"] is False
+assert report["safety"]["touches_dhcp_runtime"] is False
+assert report["safety"]["touches_cake_runtime"] is False
+assert report["safety"]["cancels_rollback"] is False
+assert report["safety"]["reads_reports_only"] is True
+assert report["summary"]["gate_count"] == 7
+assert report["summary"]["passed_count"] == 7
+assert report["summary"]["failed_count"] == 0
+assert report["summary"]["missing_required_count"] == 0
+assert report["summary"]["router_deployment_complete"] is True
+assert report["summary"]["rollback_cancelled"] is True
+assert report["summary"]["safe_to_leave_live_state"] is True
+assert report["summary"]["ready_for_live_apply"] is False
+assert report["summary"]["safe_to_apply_live"] is False
+assert report["summary"]["next_gate"] == "operator-review"
+assert report["blockers"] == []
+PYJSON
+
 echo "Smoke test passed."
