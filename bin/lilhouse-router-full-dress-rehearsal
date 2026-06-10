@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def run_json(cmd):
+    out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
+    return json.loads(out)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Run full LilHouse router non-live deploy/apply rehearsal."
+    )
+    parser.add_argument("--out-dir", required=True)
+    parser.add_argument("--source-root", required=True)
+    parser.add_argument("--stage-root", required=True)
+    parser.add_argument("--apply-target-root", required=True)
+    parser.add_argument("--wan", default=None)
+    parser.add_argument("--lan", default=None)
+    parser.add_argument("--enable-cake", action="store_true")
+    parser.add_argument("--enable-ipv6", action="store_true")
+    args = parser.parse_args()
+
+    script_dir = Path(__file__).resolve().parent
+    out_dir = Path(args.out_dir).resolve()
+    source_root = Path(args.source_root).resolve()
+    stage_root = Path(args.stage_root).resolve()
+    apply_target_root = Path(args.apply_target_root).resolve()
+
+    for name, path in {
+        "stage_root": stage_root,
+        "apply_target_root": apply_target_root,
+    }.items():
+        if str(path) == "/":
+            print(f"ERROR: refusing live / for {name}", file=sys.stderr)
+            return 2
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    preflight_cmd = [
+        str(script_dir / "lilhouse-router-deploy-preflight"),
+        "--out-dir", str(out_dir / "preflight"),
+        "--source-root", str(source_root),
+        "--stage-root", str(stage_root),
+    ]
+    if args.wan:
+        preflight_cmd += ["--wan", args.wan]
+    if args.lan:
+        preflight_cmd += ["--lan", args.lan]
+    if args.enable_cake:
+        preflight_cmd += ["--enable-cake"]
+    if args.enable_ipv6:
+        preflight_cmd += ["--enable-ipv6"]
+
+    preflight = run_json(preflight_cmd)
+
+    apply_plan_path = out_dir / "apply-plan.json"
+    apply_plan = run_json([
+        str(script_dir / "lilhouse-router-apply-plan"),
+        str(out_dir / "preflight" / "deploy-preflight-report.json"),
+        "--target-root", str(apply_target_root),
+    ])
+    apply_plan_path.write_text(json.dumps(apply_plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    apply_dry_run_path = out_dir / "apply-dry-run.json"
+    apply_dry_run = run_json([
+        str(script_dir / "lilhouse-router-apply-dry-run"),
+        str(apply_plan_path),
+        "--target-root", str(apply_target_root),
+    ])
+    apply_dry_run_path.write_text(json.dumps(apply_dry_run, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    apply_create = run_json([
+        str(script_dir / "lilhouse-router-apply-create"),
+        str(apply_dry_run_path),
+        "--target-root", str(apply_target_root),
+        "--yes",
+    ])
+
+    apply_validate = run_json([
+        str(script_dir / "lilhouse-router-apply-validate"),
+        str(apply_target_root),
+    ])
+
+    ok = (
+        preflight.get("ok") is True
+        and apply_plan.get("ok") is True
+        and apply_dry_run.get("ok") is True
+        and apply_create.get("ok") is True
+        and apply_validate.get("ok") is True
+    )
+
+    result = {
+        "schema": "lilhouse.router_full_dress_rehearsal.v1",
+        "mode": "full-dress-rehearsal",
+        "apply": False,
+        "live_changes": False,
+        "live_root_allowed": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "out_dir": str(out_dir),
+        "source_root": str(source_root),
+        "stage_root": str(stage_root),
+        "apply_target_root": str(apply_target_root),
+        "ok": ok,
+        "summary": {
+            "preflight_ok": preflight.get("ok") is True,
+            "apply_plan_ok": apply_plan.get("ok") is True,
+            "apply_dry_run_ok": apply_dry_run.get("ok") is True,
+            "apply_create_ok": apply_create.get("ok") is True,
+            "apply_validate_ok": apply_validate.get("ok") is True,
+            "copied_count": apply_create.get("copied_count"),
+            "validated_missing_after_copy": apply_validate.get("summary", {}).get("missing_after_copy"),
+            "safe_to_apply_live": False,
+        },
+        "reports": {
+            "preflight": preflight,
+            "apply_plan": apply_plan,
+            "apply_dry_run": apply_dry_run,
+            "apply_create": apply_create,
+            "apply_validate": apply_validate,
+        },
+    }
+
+    report_path = out_dir / "full-dress-rehearsal-report.json"
+    report_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

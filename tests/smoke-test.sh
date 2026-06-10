@@ -37,6 +37,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-apply-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-apply-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-apply-create"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-apply-validate"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-full-dress-rehearsal"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -421,6 +422,41 @@ assert data["summary"]["stage_validate_ok"] is True
 assert data["summary"]["stage_validate_errors"] == 0
 assert data["summary"]["missing_after_copy"] == 0
 assert data["summary"]["copied_count"] == data["summary"]["expected_copy_count"]
+assert data["summary"]["safe_to_apply_live"] is False
+PYJSON
+
+DRESS_OUT="$TMP_STATE/router-full-dress-rehearsal"
+DRESS_STAGE="$TMP_STATE/router-full-dress-stage"
+DRESS_APPLY="$TMP_STATE/router-full-dress-apply"
+"$REPO_DIR/bin/lilhouse-router-full-dress-rehearsal" \
+  --out-dir "$DRESS_OUT" \
+  --source-root "$TMP_ROOT" \
+  --stage-root "$DRESS_STAGE" \
+  --apply-target-root "$DRESS_APPLY" \
+  --wan eth0 \
+  --lan eth1 \
+  --enable-cake \
+  --enable-ipv6 >"$TMP_STATE/router-full-dress-rehearsal.json"
+
+python3 -m json.tool "$TMP_STATE/router-full-dress-rehearsal.json" >/dev/null
+test -f "$DRESS_OUT/full-dress-rehearsal-report.json"
+test -f "$DRESS_APPLY/apply-create-report.json"
+test -f "$DRESS_APPLY/etc/nftables.conf"
+
+python3 - "$TMP_STATE/router-full-dress-rehearsal.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_full_dress_rehearsal.v1"
+assert data["apply"] is False
+assert data["live_changes"] is False
+assert data["live_root_allowed"] is False
+assert data["ok"] is True
+assert data["summary"]["preflight_ok"] is True
+assert data["summary"]["apply_plan_ok"] is True
+assert data["summary"]["apply_dry_run_ok"] is True
+assert data["summary"]["apply_create_ok"] is True
+assert data["summary"]["apply_validate_ok"] is True
+assert data["summary"]["validated_missing_after_copy"] == 0
 assert data["summary"]["safe_to_apply_live"] is False
 PYJSON
 
