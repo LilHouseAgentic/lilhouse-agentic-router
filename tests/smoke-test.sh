@@ -42,6 +42,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-live-readiness"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-timed-rollback-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-timed-rollback-create"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-timed-rollback-validate"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-timed-rollback-rehearsal"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -537,6 +538,37 @@ assert data["live_root_allowed"] is False
 assert data["ok"] is True
 assert data["error_count"] == 0
 assert data["summary"]["checks_passed"] == data["summary"]["checks_total"]
+assert data["summary"]["safe_to_apply_live"] is False
+PYJSON
+
+ROLLBACK_REHEARSAL_OUT="$TMP_STATE/router-timed-rollback-rehearsal"
+ROLLBACK_REHEARSAL_UNITS="$TMP_STATE/router-timed-rollback-rehearsal-units"
+"$REPO_DIR/bin/lilhouse-router-timed-rollback-rehearsal" \
+  --out-dir "$ROLLBACK_REHEARSAL_OUT" \
+  --source-root "$TMP_ROOT" \
+  --unit-target-root "$ROLLBACK_REHEARSAL_UNITS" \
+  --rollback-root / \
+  --timeout-minutes 5 >"$TMP_STATE/router-timed-rollback-rehearsal.json"
+
+python3 -m json.tool "$TMP_STATE/router-timed-rollback-rehearsal.json" >/dev/null
+test -f "$ROLLBACK_REHEARSAL_OUT/timed-rollback-rehearsal-report.json"
+test -f "$ROLLBACK_REHEARSAL_UNITS/timed-rollback-create-report.json"
+test -f "$ROLLBACK_REHEARSAL_UNITS/etc/systemd/system/lilhouse-router-rollback-guard.service"
+test -f "$ROLLBACK_REHEARSAL_UNITS/etc/systemd/system/lilhouse-router-rollback-guard.timer"
+
+python3 - "$TMP_STATE/router-timed-rollback-rehearsal.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_timed_rollback_rehearsal.v1"
+assert data["apply"] is False
+assert data["live_changes"] is False
+assert data["live_root_allowed"] is False
+assert data["ok"] is True
+assert data["summary"]["backup_verified"] is True
+assert data["summary"]["rollback_plan_ok"] is True
+assert data["summary"]["rollback_units_created"] is True
+assert data["summary"]["rollback_units_validated"] is True
+assert data["summary"]["rollback_checks_passed"] == data["summary"]["rollback_checks_total"]
 assert data["summary"]["safe_to_apply_live"] is False
 PYJSON
 
