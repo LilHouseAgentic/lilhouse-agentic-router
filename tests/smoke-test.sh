@@ -184,6 +184,7 @@ grep -q "dns" "$WIZARD_OUT/router-plan-summary.txt"
 grep -q "dhcp" "$WIZARD_OUT/router-plan-summary.txt"
 grep -q "worker_timers" "$WIZARD_OUT/router-plan-summary.txt"
 grep -q "No system changes" "$WIZARD_LOG"
+grep -q "Preview validation passed." "$WIZARD_LOG"
 "$REPO_DIR/bin/lilhouse-router-preview-validate" "$WIZARD_OUT/preview" >/dev/null
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
