@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+COMMON="${LILHOUSE_COMMON:-/usr/lib/lilhouse/lilhouse-common.sh}"
+if [ -f "$COMMON" ]; then
+  # shellcheck source=/dev/null
+  . "$COMMON"
+else
+  : "${LILHOUSE_STATE_DIR:=/var/lib/lilhouse}"
+  lilhouse_ensure_dirs() { mkdir -p "$LILHOUSE_STATE_DIR"; }
+  lilhouse_now_iso() { date -Is; }
+fi
+
+lilhouse_ensure_dirs
+
+OUT="${LILHOUSE_ACTIONS_FILE:-$LILHOUSE_STATE_DIR/actions.jsonl}"
+
+ACTION="${1:-action}"
+RESULT="${2:-unknown}"
+MESSAGE="${3:-}"
+SOURCE="${4:-manual}"
+
+python3 - "$OUT" "$ACTION" "$RESULT" "$MESSAGE" "$SOURCE" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+out, action, result, message, source = sys.argv[1:6]
+Path(out).parent.mkdir(parents=True, exist_ok=True)
+
+record = {
+    "ts": datetime.now(timezone.utc).astimezone().isoformat(),
+    "action": action,
+    "result": result,
+    "message": message,
+    "source": source,
+}
+
+with open(out, "a", encoding="utf-8") as f:
+    f.write(json.dumps(record, separators=(",", ":")) + "\n")
+PY

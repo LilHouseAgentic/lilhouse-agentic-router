@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+COMMON="${LILHOUSE_COMMON:-/usr/lib/lilhouse/lilhouse-common.sh}"
+if [ -f "$COMMON" ]; then
+  # shellcheck source=/dev/null
+  . "$COMMON"
+else
+  : "${LILHOUSE_STATE_DIR:=/var/lib/lilhouse}"
+  lilhouse_ensure_dirs() { mkdir -p "$LILHOUSE_STATE_DIR"; }
+  lilhouse_now_iso() { date -Is; }
+fi
+
+lilhouse_ensure_dirs
+
+OUT="${LILHOUSE_EVENTS_FILE:-$LILHOUSE_STATE_DIR/events.jsonl}"
+
+TYPE="${1:-event}"
+SEVERITY="${2:-info}"
+MESSAGE="${3:-}"
+SOURCE="${4:-manual}"
+
+python3 - "$OUT" "$TYPE" "$SEVERITY" "$MESSAGE" "$SOURCE" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+out, event_type, severity, message, source = sys.argv[1:6]
+Path(out).parent.mkdir(parents=True, exist_ok=True)
+
+record = {
+    "ts": datetime.now(timezone.utc).astimezone().isoformat(),
+    "type": event_type,
+    "severity": severity,
+    "message": message,
+    "source": source,
+}
+
+with open(out, "a", encoding="utf-8") as f:
+    f.write(json.dumps(record, separators=(",", ":")) + "\n")
+PY
