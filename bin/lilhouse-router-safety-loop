@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def run_json(cmd):
+    out = subprocess.check_output(cmd, text=True)
+    return json.loads(out)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Run the LilHouse router backup/restore safety loop."
+    )
+    parser.add_argument("--root", required=True, help="Source root to back up from.")
+    parser.add_argument("--backup-dir", required=True, help="Backup output directory.")
+    parser.add_argument("--restore-root", required=True, help="Restore target root.")
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Required confirmation flag. Without this, no files are copied.",
+    )
+    args = parser.parse_args()
+
+    if not args.yes:
+        print("ERROR: refusing to run safety loop without --yes", file=sys.stderr)
+        return 2
+
+    root = Path(args.root).resolve()
+    backup_dir = Path(args.backup_dir).resolve()
+    restore_root = Path(args.restore_root).resolve()
+
+    script_dir = Path(__file__).resolve().parent
+
+    backup_create = run_json([
+        str(script_dir / "lilhouse-router-backup-create"),
+        "--root", str(root),
+        "--backup-dir", str(backup_dir),
+        "--yes",
+    ])
+
+    backup_verify = run_json([
+        str(script_dir / "lilhouse-router-backup-verify"),
+        str(backup_dir),
+    ])
+
+    restore_dry_run = run_json([
+        str(script_dir / "lilhouse-router-restore-dry-run"),
+        str(backup_dir),
+        "--root", str(restore_root),
+    ])
+
+    restore_create = run_json([
+        str(script_dir / "lilhouse-router-restore-create"),
+        str(backup_dir),
+        "--root", str(restore_root),
+        "--yes",
+    ])
+
+    result = {
+        "schema": "lilhouse.router_safety_loop.v1",
+        "mode": "safety-loop",
+        "apply": True,
+        "root": str(root),
+        "backup_dir": str(backup_dir),
+        "restore_root": str(restore_root),
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "ok": (
+            backup_verify.get("ok") is True
+            and restore_create.get("ok") is True
+            and restore_dry_run["summary"]["would_restore"] == backup_create["summary"]["copied"]
+            and restore_create["summary"]["restored"] == backup_create["summary"]["copied"]
+        ),
+        "summary": {
+            "backed_up": backup_create["summary"]["copied"],
+            "backup_missing": backup_create["summary"]["missing"],
+            "verified": backup_verify["verified_count"],
+            "would_restore": restore_dry_run["summary"]["would_restore"],
+            "restored": restore_create["summary"]["restored"],
+            "restore_errors": restore_create["summary"]["errors"],
+        },
+        "reports": {
+            "backup_create": backup_create,
+            "backup_verify": backup_verify,
+            "restore_dry_run": restore_dry_run,
+            "restore_create": restore_create,
+        },
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

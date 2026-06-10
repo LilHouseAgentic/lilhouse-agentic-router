@@ -29,6 +29,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-create"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-verify"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-restore-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-restore-create"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-safety-loop"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -263,6 +264,33 @@ restore = json.load(open(sys.argv[2]))
 assert restore["summary"]["restored"] == backup["summary"]["copied"]
 assert restore["summary"]["restored"] >= 4
 assert restore["ok"] is True
+PYJSON
+
+SAFETY_RESTORE_TARGET="$TMP_STATE/router-safety-loop-restore-target"
+SAFETY_BACKUP_OUT="$TMP_STATE/router-safety-loop-backup"
+mkdir -p "$SAFETY_RESTORE_TARGET"
+
+"$REPO_DIR/bin/lilhouse-router-safety-loop" \
+  --root "$TMP_ROOT" \
+  --backup-dir "$SAFETY_BACKUP_OUT" \
+  --restore-root "$SAFETY_RESTORE_TARGET" \
+  --yes >"$TMP_STATE/router-safety-loop.json"
+
+python3 -m json.tool "$TMP_STATE/router-safety-loop.json" >/dev/null
+test -f "$SAFETY_RESTORE_TARGET/restore-report.json"
+test -f "$SAFETY_RESTORE_TARGET/etc/nftables.conf"
+test -f "$SAFETY_RESTORE_TARGET/etc/pihole/test.conf"
+
+python3 - "$TMP_STATE/router-safety-loop.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_safety_loop.v1"
+assert data["ok"] is True
+assert data["summary"]["backed_up"] >= 4
+assert data["summary"]["backed_up"] == data["summary"]["verified"]
+assert data["summary"]["backed_up"] == data["summary"]["would_restore"]
+assert data["summary"]["backed_up"] == data["summary"]["restored"]
+assert data["summary"]["restore_errors"] == 0
 PYJSON
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
