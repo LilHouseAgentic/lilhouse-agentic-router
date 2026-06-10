@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Dry-run service activation sequence using simulated step results. Writes nothing."
+    )
+    parser.add_argument("service_activation_plan", help="service activation plan JSON.")
+    parser.add_argument("--results", required=True, help="JSON object mapping activation step id to true/false.")
+    args = parser.parse_args()
+
+    plan_path = Path(args.service_activation_plan).resolve()
+    results_path = Path(args.results).resolve()
+
+    if not plan_path.is_file():
+        print(f"ERROR: service activation plan not found: {plan_path}", file=sys.stderr)
+        return 1
+    if not results_path.is_file():
+        print(f"ERROR: results file not found: {results_path}", file=sys.stderr)
+        return 1
+
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    results = json.loads(results_path.read_text(encoding="utf-8"))
+
+    errors = []
+    if plan.get("schema") != "lilhouse.router_service_activation_plan.v1":
+        errors.append("input is not a service activation plan")
+    if plan.get("ok") is not True:
+        errors.append("service activation plan is not OK")
+    if plan.get("apply") is not False:
+        errors.append("service activation plan must be non-applying")
+    if plan.get("live_changes") is not False:
+        errors.append("service activation plan must declare live_changes false")
+    if not isinstance(results, dict):
+        errors.append("results JSON must be an object mapping step id to boolean")
+
+    evaluated = []
+    blocked = False
+    rollback_cancel_allowed = False
+
+    if not errors:
+        for step in sorted(plan.get("steps", []), key=lambda item: item.get("order", 0)):
+            step_id = step.get("id")
+            supplied = results.get(step_id)
+
+            if blocked:
+                status = "blocked"
+                passed = False
+            elif supplied is True:
+                status = "pass"
+                passed = True
+            elif supplied is False:
+                status = "fail"
+                passed = False
+                blocked = True
+            else:
+                status = "missing"
+                passed = False
+                blocked = True
+
+            if step_id == "cancel_rollback_only_after_health_pass":
+                rollback_cancel_allowed = passed and not blocked
+
+            evaluated.append({
+                "order": step.get("order"),
+                "id": step_id,
+                "status": status,
+                "passed": passed,
+                "blocked": status == "blocked",
+                "apply_now": False,
+                "reason": step.get("reason"),
+            })
+
+    failed_steps = [item for item in evaluated if item["status"] in ("fail", "missing")]
+    blocked_steps = [item for item in evaluated if item["status"] == "blocked"]
+    all_steps_passed = bool(evaluated) and not failed_steps and not blocked_steps
+
+    result = {
+        "schema": "lilhouse.router_service_activation_dry_run.v1",
+        "mode": "service-activation-dry-run",
+        "apply": False,
+        "live_changes": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "service_activation_plan": str(plan_path),
+        "results": str(results_path),
+        "ok": not errors,
+        "error_count": len(errors),
+        "errors": errors,
+        "evaluated": evaluated,
+        "summary": {
+            "step_count": len(evaluated),
+            "failed_step_count": len(failed_steps),
+            "blocked_step_count": len(blocked_steps),
+            "all_steps_passed": all_steps_passed,
+            "rollback_cancel_allowed_by_sequence": rollback_cancel_allowed,
+            "safe_to_cancel_rollback_now": False,
+            "safe_to_apply_live": False,
+        },
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

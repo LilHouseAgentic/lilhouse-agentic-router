@@ -49,6 +49,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-post-apply-health-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-post-apply-health-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-post-apply-health-rehearsal"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-service-activation-plan"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-service-activation-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -750,6 +751,68 @@ assert data["summary"]["step_count"] >= 7
 assert data["summary"]["rollback_armed_before_network_changes"] is True
 assert data["summary"]["rollback_cancel_after_health_only"] is True
 assert data["summary"]["safe_to_apply_live"] is False
+PYJSON
+
+
+cat >"$TMP_STATE/router-service-activation-results-fail.json" <<'JSON'
+{
+  "daemon_reload_before_enable": true,
+  "arm_rollback_timer": true,
+  "apply_forwarding_sysctl": true,
+  "activate_firewall": false,
+  "activate_networkd": true,
+  "activate_lilhouse_timers": true,
+  "run_post_apply_health": true,
+  "cancel_rollback_only_after_health_pass": true
+}
+JSON
+
+cat >"$TMP_STATE/router-service-activation-results-pass.json" <<'JSON'
+{
+  "daemon_reload_before_enable": true,
+  "arm_rollback_timer": true,
+  "apply_forwarding_sysctl": true,
+  "activate_firewall": true,
+  "activate_networkd": true,
+  "activate_lilhouse_timers": true,
+  "run_post_apply_health": true,
+  "cancel_rollback_only_after_health_pass": true
+}
+JSON
+
+"$REPO_DIR/bin/lilhouse-router-service-activation-dry-run" \
+  "$TMP_STATE/router-service-activation-plan.json" \
+  --results "$TMP_STATE/router-service-activation-results-fail.json" >"$TMP_STATE/router-service-activation-dry-run-fail.json"
+
+"$REPO_DIR/bin/lilhouse-router-service-activation-dry-run" \
+  "$TMP_STATE/router-service-activation-plan.json" \
+  --results "$TMP_STATE/router-service-activation-results-pass.json" >"$TMP_STATE/router-service-activation-dry-run-pass.json"
+
+python3 -m json.tool "$TMP_STATE/router-service-activation-dry-run-fail.json" >/dev/null
+python3 -m json.tool "$TMP_STATE/router-service-activation-dry-run-pass.json" >/dev/null
+
+python3 - "$TMP_STATE/router-service-activation-dry-run-fail.json" "$TMP_STATE/router-service-activation-dry-run-pass.json" <<'PYJSON'
+import json, sys
+fail = json.load(open(sys.argv[1]))
+passed = json.load(open(sys.argv[2]))
+
+assert fail["schema"] == "lilhouse.router_service_activation_dry_run.v1"
+assert fail["apply"] is False
+assert fail["live_changes"] is False
+assert fail["ok"] is True
+assert fail["summary"]["all_steps_passed"] is False
+assert fail["summary"]["failed_step_count"] >= 1
+assert fail["summary"]["blocked_step_count"] >= 1
+assert fail["summary"]["rollback_cancel_allowed_by_sequence"] is False
+
+assert passed["schema"] == "lilhouse.router_service_activation_dry_run.v1"
+assert passed["apply"] is False
+assert passed["live_changes"] is False
+assert passed["ok"] is True
+assert passed["summary"]["all_steps_passed"] is True
+assert passed["summary"]["rollback_cancel_allowed_by_sequence"] is True
+assert passed["summary"]["safe_to_cancel_rollback_now"] is False
+assert passed["summary"]["safe_to_apply_live"] is False
 PYJSON
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
