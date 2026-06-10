@@ -26,6 +26,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-preview-validate"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-create"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-verify"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -221,6 +222,12 @@ test -f "$BACKUP_OUT/etc/pihole/test.conf"
 grep -q '"schema": "lilhouse.router_backup_create.v1"' "$TMP_STATE/router-backup-create.json"
 grep -q '"apply": true' "$TMP_STATE/router-backup-create.json"
 grep -q '"file_copied"' "$TMP_STATE/router-backup-create.json"
+
+"$REPO_DIR/bin/lilhouse-router-backup-verify" "$BACKUP_OUT" >"$TMP_STATE/router-backup-verify.json"
+python3 -m json.tool "$TMP_STATE/router-backup-verify.json" >/dev/null
+grep -q '"schema": "lilhouse.router_backup_verify.v1"' "$TMP_STATE/router-backup-verify.json"
+grep -q '"ok": true' "$TMP_STATE/router-backup-verify.json"
+grep -q '"error_count": 0' "$TMP_STATE/router-backup-verify.json"
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
 "$REPO_DIR/bin/lilhouse-router-wizard" \
