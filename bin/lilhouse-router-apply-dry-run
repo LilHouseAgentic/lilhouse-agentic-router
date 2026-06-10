@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Dry-run a LilHouse router apply plan. Copies nothing and refuses live /."
+    )
+    parser.add_argument("apply_plan", help="router apply-plan JSON.")
+    parser.add_argument("--target-root", required=True, help="Target root to inspect for dry-run.")
+    args = parser.parse_args()
+
+    plan_path = Path(args.apply_plan).resolve()
+    target_root = Path(args.target_root).resolve()
+
+    if str(target_root) == "/":
+        print("ERROR: refusing apply dry-run against live /", file=sys.stderr)
+        return 2
+
+    if not plan_path.is_file():
+        print(f"ERROR: apply plan not found: {plan_path}", file=sys.stderr)
+        return 1
+
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+
+    errors = []
+
+    if plan.get("schema") != "lilhouse.router_apply_plan.v1":
+        errors.append("input is not a router apply-plan report")
+
+    if plan.get("ok") is not True:
+        errors.append("apply plan is not OK")
+
+    if plan.get("apply") is not False:
+        errors.append("apply plan must be non-applying")
+
+    if plan.get("live_changes") is not False:
+        errors.append("apply plan must declare live_changes false")
+
+    if plan.get("summary", {}).get("safe_to_apply_now") is not False:
+        errors.append("apply plan must not declare safe_to_apply_now true")
+
+    stage_root_raw = plan.get("stage_root")
+    if not stage_root_raw:
+        errors.append("apply plan does not include stage_root")
+        stage_root = None
+    else:
+        stage_root = Path(stage_root_raw).resolve()
+        if not stage_root.is_dir():
+            errors.append(f"stage root not found: {stage_root}")
+
+    would_copy = []
+
+    if stage_root and stage_root.is_dir():
+        for source in sorted(stage_root.rglob("*")):
+            if not source.is_file():
+                continue
+
+            rel = source.relative_to(stage_root)
+            target = target_root / rel
+
+            would_copy.append(
+                {
+                    "relative_path": str(rel),
+                    "source": str(source),
+                    "target": str(target),
+                    "target_exists_now": target.exists(),
+                    "would_copy": True,
+                }
+            )
+
+    result = {
+        "schema": "lilhouse.router_apply_dry_run.v1",
+        "mode": "apply-dry-run",
+        "apply": False,
+        "live_changes": False,
+        "copies_files": False,
+        "live_root_allowed": False,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "apply_plan": str(plan_path),
+        "stage_root": str(stage_root) if stage_root else None,
+        "target_root": str(target_root),
+        "ok": not errors,
+        "error_count": len(errors),
+        "errors": errors,
+        "would_copy_count": len(would_copy),
+        "would_copy": would_copy,
+        "summary": {
+            "gates_ok": plan.get("summary", {}).get("gates_ok"),
+            "gate_count": plan.get("summary", {}).get("gate_count"),
+            "actions_planned": plan.get("summary", {}).get("actions_planned"),
+            "would_copy_count": len(would_copy),
+            "requires_fresh_backup": plan.get("summary", {}).get("requires_fresh_backup"),
+            "requires_timed_rollback": plan.get("summary", {}).get("requires_timed_rollback"),
+            "requires_manual_confirmation": plan.get("summary", {}).get("requires_manual_confirmation"),
+            "safe_to_apply_now": False,
+        },
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

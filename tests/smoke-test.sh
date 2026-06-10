@@ -34,6 +34,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-stage-preview"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-stage-validate"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-deploy-preflight"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-apply-plan"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-apply-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-status"
 test -x "$TMP_ROOT/usr/lib/lilhouse/lilhouse-common.sh"
 test -f "$TMP_ROOT/etc/lilhouse/lilhouse.env"
@@ -361,6 +362,24 @@ assert data["summary"]["requires_fresh_backup"] is True
 assert data["summary"]["requires_manual_confirmation"] is True
 assert data["summary"]["safe_to_apply_now"] is False
 assert data["summary"]["actions_planned"] >= 8
+PYJSON
+
+APPLY_DRY_TARGET="$TMP_STATE/router-apply-dry-run-target"
+mkdir -p "$APPLY_DRY_TARGET"
+"$REPO_DIR/bin/lilhouse-router-apply-dry-run" "$TMP_STATE/router-apply-plan.json" --target-root "$APPLY_DRY_TARGET" >"$TMP_STATE/router-apply-dry-run.json"
+python3 -m json.tool "$TMP_STATE/router-apply-dry-run.json" >/dev/null
+
+python3 - "$TMP_STATE/router-apply-dry-run.json" <<'PYJSON'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["schema"] == "lilhouse.router_apply_dry_run.v1"
+assert data["apply"] is False
+assert data["live_changes"] is False
+assert data["copies_files"] is False
+assert data["live_root_allowed"] is False
+assert data["ok"] is True
+assert data["summary"]["safe_to_apply_now"] is False
+assert data["would_copy_count"] >= 10
 PYJSON
 
 CAKE_WIZARD_OUT="$TMP_STATE/install-router-wizard-cake"
