@@ -1,0 +1,386 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+OPERATOR_PHRASE = "I understand this may temporarily interrupt my network"
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def write_json(path, data):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def run_gate(name, argv, work_dir):
+    log_dir = work_dir / "live-command-logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    p = subprocess.run(
+        argv,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    stdout_path = log_dir / f"{name}.stdout"
+    stderr_path = log_dir / f"{name}.stderr"
+
+    stdout_path.write_text(p.stdout, encoding="utf-8")
+    stderr_path.write_text(p.stderr, encoding="utf-8")
+
+    result = {
+        "name": name,
+        "argv": [str(x) for x in argv],
+        "returncode": p.returncode,
+        "ok": p.returncode == 0,
+        "stdout_path": str(stdout_path),
+        "stderr_path": str(stderr_path),
+        "stderr": p.stderr.strip(),
+    }
+
+    if p.returncode == 0:
+        try:
+            parsed = json.loads(p.stdout)
+            result["json_schema"] = parsed.get("schema")
+            result["json_ok"] = parsed.get("ok")
+        except Exception:
+            result["json_schema"] = None
+            result["json_ok"] = None
+
+    return result
+
+
+def plan_report(args):
+    target_root = Path(args.target_root).resolve()
+
+    return {
+        "schema": "lilhouse.router_live_orchestrator_plan.v1",
+        "ok": True,
+        "generated_at": now_iso(),
+        "mode": "live-orchestrator-plan-only",
+        "operator_phrase_required": OPERATOR_PHRASE,
+        "inputs": {
+            "preflight_report": args.preflight_report,
+            "preview_dir": args.preview_dir,
+            "backup_dir": args.backup_dir,
+            "work_dir": args.work_dir,
+            "target_root": str(target_root),
+            "timeout_minutes": args.timeout_minutes,
+            "execute": args.execute,
+            "yes": args.yes,
+            "allow_live_root": args.allow_live_root,
+            "operator_phrase_supplied": bool(args.operator_phrase),
+        },
+        "safety": {
+            "apply": False,
+            "live_changes": False,
+            "plan_only": True,
+            "copies_files": False,
+            "writes_config": False,
+            "runs_services": False,
+            "starts_router_services": False,
+            "restarts_network": False,
+            "touches_network_runtime": False,
+            "touches_firewall_runtime": False,
+            "touches_dns_runtime": False,
+            "touches_dhcp_runtime": False,
+            "touches_cake_runtime": False,
+            "cancels_rollback": False,
+        },
+        "summary": {
+            "would_target_live_root": target_root == Path("/"),
+            "would_run_live_chain": True,
+            "ready_for_execution": (
+                args.execute
+                and args.yes
+                and args.allow_live_root
+                and args.operator_phrase == OPERATOR_PHRASE
+                and target_root == Path("/")
+            ),
+            "ready_for_live_apply": False,
+            "safe_to_apply_live": False,
+            "next_gate": "explicit-live-execution",
+        },
+        "planned_order": [
+            "live_backup",
+            "rollback_guard",
+            "rollback_start",
+            "live_config_copy",
+            "service_activation",
+            "post_apply_health",
+            "rollback_cancel",
+            "final_summary",
+        ],
+    }
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Run the guarded router deployment chain on live root after explicit approval.")
+    ap.add_argument("--preflight-report", required=True)
+    ap.add_argument("--preview-dir", required=True)
+    ap.add_argument("--backup-dir", required=True)
+    ap.add_argument("--work-dir", required=True)
+    ap.add_argument("--target-root", default="/")
+    ap.add_argument("--timeout-minutes", type=int, default=5)
+    ap.add_argument("--plan-only", action="store_true", help="Print the live execution plan and do not run anything.")
+    ap.add_argument("--execute", action="store_true", help="Required to execute the live chain.")
+    ap.add_argument("--yes", action="store_true", help="Required to execute the live chain.")
+    ap.add_argument("--allow-live-root", action="store_true", help="Required to target live /.")
+    ap.add_argument("--operator-phrase", default="", help="Must exactly match the required operator phrase.")
+    ap.add_argument("--out", default="")
+    args = ap.parse_args()
+
+    target_root = Path(args.target_root).resolve()
+
+    if args.plan_only:
+        report = plan_report(args)
+        if args.out:
+            write_json(args.out, report)
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0
+
+    if not args.execute:
+        print("ERROR: refusing to run live orchestrator without --execute", file=sys.stderr)
+        return 2
+
+    if not args.yes:
+        print("ERROR: refusing to run live orchestrator without --yes", file=sys.stderr)
+        return 2
+
+    if target_root != Path("/"):
+        print("ERROR: live orchestrator only supports --target-root /", file=sys.stderr)
+        return 2
+
+    if not args.allow_live_root:
+        print("ERROR: refusing to target live / without --allow-live-root", file=sys.stderr)
+        return 2
+
+    if args.operator_phrase != OPERATOR_PHRASE:
+        print("ERROR: refusing to run live orchestrator without exact operator phrase", file=sys.stderr)
+        print(f"Required phrase: {OPERATOR_PHRASE}", file=sys.stderr)
+        return 2
+
+    preflight_report = Path(args.preflight_report).resolve()
+    preview_dir = Path(args.preview_dir).resolve()
+    backup_dir = Path(args.backup_dir).resolve()
+    work_dir = Path(args.work_dir).resolve()
+
+    if not preflight_report.exists():
+        print(f"ERROR: missing preflight report: {preflight_report}", file=sys.stderr)
+        return 2
+
+    if not (preview_dir / "etc").is_dir():
+        print(f"ERROR: preview dir does not contain etc/: {preview_dir}", file=sys.stderr)
+        return 2
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    repo = Path(__file__).resolve().parent.parent
+    bin_dir = repo / "bin"
+
+    live_backup_report = backup_dir / "live-backup-report.json"
+    rollback_guard_json = work_dir / "rollback-guard.json"
+    rollback_start_json = work_dir / "rollback-start.json"
+    live_config_copy_json = work_dir / "live-config-copy.json"
+    service_activation_json = work_dir / "service-activation.json"
+    post_apply_health_json = work_dir / "post-apply-health.json"
+    rollback_cancel_json = work_dir / "rollback-cancel.json"
+    final_summary_json = work_dir / "final-summary.json"
+
+    commands = [
+        (
+            "live_backup",
+            [
+                str(bin_dir / "lilhouse-router-live-backup"),
+                "--preflight-report", str(preflight_report),
+                "--backup-dir", str(backup_dir),
+                "--root", "/",
+                "--yes",
+                "--allow-live-root",
+            ],
+        ),
+        (
+            "rollback_guard",
+            [
+                str(bin_dir / "lilhouse-router-rollback-guard"),
+                "--backup-report", str(live_backup_report),
+                "--target-root", "/",
+                "--timeout-minutes", str(args.timeout_minutes),
+                "--yes",
+                "--allow-live-root",
+                "--out", str(rollback_guard_json),
+            ],
+        ),
+        (
+            "rollback_start",
+            [
+                str(bin_dir / "lilhouse-router-rollback-start"),
+                "--rollback-guard-report", str(rollback_guard_json),
+                "--target-root", "/",
+                "--yes",
+                "--allow-live-root",
+                "--out", str(rollback_start_json),
+            ],
+        ),
+        (
+            "live_config_copy",
+            [
+                str(bin_dir / "lilhouse-router-live-config-copy"),
+                "--rollback-start-report", str(rollback_start_json),
+                "--preview-dir", str(preview_dir),
+                "--target-root", "/",
+                "--yes",
+                "--allow-live-root",
+                "--out", str(live_config_copy_json),
+            ],
+        ),
+        (
+            "service_activation",
+            [
+                str(bin_dir / "lilhouse-router-service-activation"),
+                "--config-copy-report", str(live_config_copy_json),
+                "--target-root", "/",
+                "--yes",
+                "--allow-live-root",
+                "--out", str(service_activation_json),
+            ],
+        ),
+        (
+            "post_apply_health",
+            [
+                str(bin_dir / "lilhouse-router-post-apply-health-run"),
+                "--service-activation-report", str(service_activation_json),
+                "--wan", "eth0",
+                "--lan", "eth1",
+                "--lan-ip", "10.23.0.1",
+                "--dns-test-name", "example.com",
+                "--wan-test-ip", "1.1.1.1",
+                "--timeout-seconds", "3",
+                "--yes",
+                "--allow-live-probes",
+                "--out", str(post_apply_health_json),
+            ],
+        ),
+        (
+            "rollback_cancel",
+            [
+                str(bin_dir / "lilhouse-router-rollback-cancel"),
+                "--post-apply-health-report", str(post_apply_health_json),
+                "--target-root", "/",
+                "--yes",
+                "--allow-live-root",
+                "--out", str(rollback_cancel_json),
+            ],
+        ),
+        (
+            "final_summary",
+            [
+                str(bin_dir / "lilhouse-router-final-summary"),
+                "--report", f"live_backup={live_backup_report}",
+                "--report", f"rollback_guard={rollback_guard_json}",
+                "--report", f"rollback_start={rollback_start_json}",
+                "--report", f"live_config_copy={live_config_copy_json}",
+                "--report", f"service_activation={service_activation_json}",
+                "--report", f"post_apply_health={post_apply_health_json}",
+                "--report", f"rollback_cancel={rollback_cancel_json}",
+                "--out", str(final_summary_json),
+            ],
+        ),
+    ]
+
+    results = []
+    stop_reason = None
+
+    for name, argv in commands:
+        result = run_gate(name, argv, work_dir)
+        results.append(result)
+        if not result["ok"]:
+            stop_reason = f"{name} failed"
+            break
+
+    final_summary = None
+    if final_summary_json.exists():
+        try:
+            final_summary = json.loads(final_summary_json.read_text(encoding="utf-8"))
+        except Exception:
+            final_summary = None
+
+    ok = (
+        len(results) == len(commands)
+        and all(item["ok"] for item in results)
+        and isinstance(final_summary, dict)
+        and final_summary.get("ok") is True
+    )
+
+    report = {
+        "schema": "lilhouse.router_live_orchestrator.v1",
+        "ok": ok,
+        "generated_at": now_iso(),
+        "mode": "live-orchestrator-executed",
+        "inputs": {
+            "preflight_report": str(preflight_report),
+            "preview_dir": str(preview_dir),
+            "backup_dir": str(backup_dir),
+            "work_dir": str(work_dir),
+            "target_root": "/",
+            "timeout_minutes": args.timeout_minutes,
+            "execute": args.execute,
+            "yes": args.yes,
+            "allow_live_root": args.allow_live_root,
+            "operator_phrase_matched": args.operator_phrase == OPERATOR_PHRASE,
+        },
+        "safety": {
+            "apply": True,
+            "live_changes": True,
+            "target_live_root": True,
+            "rollback_required": True,
+            "backup_required": True,
+            "post_apply_health_required": True,
+            "cancels_rollback_only_after_health_ok": True,
+        },
+        "summary": {
+            "command_count": len(commands),
+            "completed_command_count": len(results),
+            "successful_command_count": len([r for r in results if r["ok"]]),
+            "failed_command_count": len([r for r in results if not r["ok"]]),
+            "stopped_early": stop_reason is not None,
+            "stop_reason": stop_reason,
+            "final_summary_ok": isinstance(final_summary, dict) and final_summary.get("ok") is True,
+            "live_orchestrator_complete": ok,
+            "safe_to_leave_live_state": ok,
+            "next_gate": "operator-review",
+        },
+        "reports": {
+            "live_backup": str(live_backup_report),
+            "rollback_guard": str(rollback_guard_json),
+            "rollback_start": str(rollback_start_json),
+            "live_config_copy": str(live_config_copy_json),
+            "service_activation": str(service_activation_json),
+            "post_apply_health": str(post_apply_health_json),
+            "rollback_cancel": str(rollback_cancel_json),
+            "final_summary": str(final_summary_json),
+        },
+        "commands": results,
+        "final_summary": final_summary,
+    }
+
+    if args.out:
+        write_json(args.out, report)
+
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if ok else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

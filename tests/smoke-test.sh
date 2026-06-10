@@ -1855,4 +1855,95 @@ assert report["summary"]["next_gate"] == "live-orchestrator-operator-approval"
 assert report["final_summary"]["ok"] is True
 PYJSON
 
+
+echo
+echo "== run live orchestrator refusal-first checks =="
+
+LIVE_ORCH_PLAN_JSON="$TMP_STATE/live-orchestrator-plan.json"
+
+"$REPO_DIR/bin/lilhouse-router-live-orchestrator" \
+  --preflight-report "$ORCH_PREFLIGHT_JSON" \
+  --preview-dir "$FULL_WIZARD_OUT/preview" \
+  --backup-dir "$TMP_STATE/live-orchestrator-backup" \
+  --work-dir "$TMP_STATE/live-orchestrator-work" \
+  --target-root / \
+  --plan-only \
+  --out "$LIVE_ORCH_PLAN_JSON" >"$TMP_STATE/live-orchestrator-plan.out"
+
+python3 - "$LIVE_ORCH_PLAN_JSON" <<'PYJSON'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text())
+assert report["schema"] == "lilhouse.router_live_orchestrator_plan.v1"
+assert report["ok"] is True
+assert report["safety"]["apply"] is False
+assert report["safety"]["live_changes"] is False
+assert report["safety"]["plan_only"] is True
+assert report["safety"]["copies_files"] is False
+assert report["safety"]["writes_config"] is False
+assert report["safety"]["runs_services"] is False
+assert report["safety"]["starts_router_services"] is False
+assert report["safety"]["restarts_network"] is False
+assert report["safety"]["cancels_rollback"] is False
+assert report["summary"]["would_target_live_root"] is True
+assert report["summary"]["would_run_live_chain"] is True
+assert report["summary"]["ready_for_execution"] is False
+assert report["summary"]["ready_for_live_apply"] is False
+assert report["summary"]["safe_to_apply_live"] is False
+assert report["summary"]["next_gate"] == "explicit-live-execution"
+PYJSON
+
+set +e
+"$REPO_DIR/bin/lilhouse-router-live-orchestrator" \
+  --preflight-report "$ORCH_PREFLIGHT_JSON" \
+  --preview-dir "$FULL_WIZARD_OUT/preview" \
+  --backup-dir "$TMP_STATE/live-orchestrator-backup" \
+  --work-dir "$TMP_STATE/live-orchestrator-work" \
+  --target-root / >"$TMP_STATE/live-orchestrator-refuse-execute.json"
+LIVE_ORCH_NO_EXECUTE_RC=$?
+set -e
+test "$LIVE_ORCH_NO_EXECUTE_RC" -eq 2
+
+set +e
+"$REPO_DIR/bin/lilhouse-router-live-orchestrator" \
+  --preflight-report /tmp/nonexistent-preflight.json \
+  --preview-dir /tmp/nonexistent-preview \
+  --backup-dir /tmp/nonexistent-backup \
+  --work-dir /tmp/nonexistent-work \
+  --target-root / \
+  --execute >"$TMP_STATE/live-orchestrator-refuse-yes.json"
+LIVE_ORCH_NO_YES_RC=$?
+set -e
+test "$LIVE_ORCH_NO_YES_RC" -eq 2
+
+set +e
+"$REPO_DIR/bin/lilhouse-router-live-orchestrator" \
+  --preflight-report /tmp/nonexistent-preflight.json \
+  --preview-dir /tmp/nonexistent-preview \
+  --backup-dir /tmp/nonexistent-backup \
+  --work-dir /tmp/nonexistent-work \
+  --target-root / \
+  --execute \
+  --yes >"$TMP_STATE/live-orchestrator-refuse-live-root.json"
+LIVE_ORCH_NO_ALLOW_RC=$?
+set -e
+test "$LIVE_ORCH_NO_ALLOW_RC" -eq 2
+
+set +e
+"$REPO_DIR/bin/lilhouse-router-live-orchestrator" \
+  --preflight-report /tmp/nonexistent-preflight.json \
+  --preview-dir /tmp/nonexistent-preview \
+  --backup-dir /tmp/nonexistent-backup \
+  --work-dir /tmp/nonexistent-work \
+  --target-root / \
+  --execute \
+  --yes \
+  --allow-live-root \
+  --operator-phrase "wrong phrase" >"$TMP_STATE/live-orchestrator-refuse-phrase.json"
+LIVE_ORCH_BAD_PHRASE_RC=$?
+set -e
+test "$LIVE_ORCH_BAD_PHRASE_RC" -eq 2
+
 echo "Smoke test passed."
