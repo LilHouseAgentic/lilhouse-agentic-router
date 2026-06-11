@@ -35,6 +35,10 @@ CONTENT_CHECKS = {
         "LilHouse router deploy validation checklist",
         "current SSH/admin session is protected from lockout",
     ],
+    "etc/systemd/network/20-lilhouse-lan.network": [
+        "IPv4Forwarding=yes",
+        "IPv6Forwarding=yes",
+    ],
     "etc/sysctl.d/90-lilhouse-router-forwarding.conf": [
         "net.ipv4.ip_forward=1",
     ],
