@@ -55,7 +55,7 @@ SERVICE_STEPS = [
     },
     {
         "name": "restart_unbound",
-        "argv": ["bash", "-lc", "if systemctl list-unit-files unbound.service --no-legend | grep -q unbound.service; then systemctl restart unbound; else echo skipped_not_installed: unbound.service; fi"],
+        "argv": ["systemctl", "restart", "unbound"],
         "kind": "systemd",
         "touches_network": False,
         "touches_firewall": False,
@@ -65,7 +65,7 @@ SERVICE_STEPS = [
     },
     {
         "name": "restart_pihole_ftl",
-        "argv": ["bash", "-lc", "if systemctl list-unit-files pihole-FTL.service --no-legend | grep -q pihole-FTL.service; then systemctl restart pihole-FTL; else echo skipped_not_installed: pihole-FTL.service; fi"],
+        "argv": ["systemctl", "restart", "pihole-FTL"],
         "kind": "systemd",
         "touches_network": False,
         "touches_firewall": False,

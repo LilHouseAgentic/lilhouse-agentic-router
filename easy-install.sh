@@ -307,17 +307,19 @@ if [ "$MODE" = "wizard" ]; then
 
   WAN="$(ask_default "WAN interface" "${WAN:-eth0}")"
   LAN="$(ask_default "LAN interface" "${LAN:-eth1}")"
-  CAKE="$(ask_yes_no "Enable CAKE/SQM in generated plan?" "${CAKE:-yes}")"
-  AI_AGENT="$(ask_yes_no "Enable local AI/agent planning in generated plan?" "${AI_AGENT:-yes}")"
-  MOBILE_ALERTS="$(ask_yes_no "Enable mobile push alerts in generated plan?" "${MOBILE_ALERTS:-no}")"
+  CAKE="yes"
+  AI_AGENT="yes"
+  MOBILE_ALERTS="$(ask_yes_no "Configure mobile push alerts now? You can choose no and set them up after install." "${MOBILE_ALERTS:-no}")"
 
   echo
   echo "Summary:"
   echo "  mode=$MODE"
   echo "  wan=$WAN"
   echo "  lan=$LAN"
-  echo "  cake=$CAKE"
-  echo "  ai_agent=$AI_AGENT"
+  echo "  appliance_stack=full_required"
+  echo "  cake=required"
+  echo "  dns=required_pihole_unbound"
+  echo "  ai_agent=required_core_agent"
   echo "  mobile_alerts=$MOBILE_ALERTS"
   echo "  work_dir=$WORK_DIR"
   echo
@@ -359,6 +361,7 @@ MOBILE_ALERTS="${MOBILE_ALERTS:-no}"
 
 BUNDLE="$REPO_DIR/bin/lilhouse-router-vm-readiness-bundle"
 LIVE_ORCH="$REPO_DIR/bin/lilhouse-router-live-orchestrator"
+APPLIANCE_INSTALL="$REPO_DIR/bin/lilhouse-router-appliance-install"
 
 test -x "$BUNDLE" || { echo "ERROR: missing executable: $BUNDLE" >&2; exit 2; }
 test -x "$LIVE_ORCH" || { echo "ERROR: missing executable: $LIVE_ORCH" >&2; exit 2; }
@@ -407,15 +410,15 @@ echo
 echo "WARNING: --vm-live installs/activates into / on this disposable VM."
 
 echo
-echo "Step 1/4: installing base prerequisites..."
-install_base_prereqs
+echo "Step 1/3: preparing full LilHouse appliance stack..."
+"$APPLIANCE_INSTALL" \
+  --prepare-only \
+  --yes \
+  --wan "$WAN" \
+  --lan "$LAN"
 
 echo
-echo "Step 2/4: installing LilHouse core files..."
-install_lilhouse_core
-
-echo
-echo "Step 3/4: generating VM preview/preflight..."
+echo "Step 2/3: generating VM preview/preflight..."
 PREP_WORK="$WORK_DIR/vm-live-prep"
 PREP_REPORT="$WORK_DIR/vm-live-prep-report.json"
 
@@ -428,7 +431,7 @@ PREP_REPORT="$WORK_DIR/vm-live-prep-report.json"
   --out "$PREP_REPORT" >/tmp/lilhouse-easy-install-vm-live-prep-last.json
 
 echo
-echo "Step 4/4: executing guarded live chain against / on throwaway VM..."
+echo "Step 3/3: executing guarded live chain against / on throwaway VM..."
 
 "$LIVE_ORCH" \
   --preflight-report "$PREP_WORK/vm-preflight.json" \
