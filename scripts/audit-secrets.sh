@@ -31,6 +31,19 @@ if [ -f "$APPLIANCE_INSTALLER" ]; then
   fi
 fi
 
+EASY_INSTALLER="easy-install.sh"
+if [ -f "$EASY_INSTALLER" ]; then
+  if grep -q -- 'Resetting VM-live work reports' "$EASY_INSTALLER" \
+    && grep -q -- 'rm -rf "$WORK_DIR/vm-live-prep" "$WORK_DIR/vm-live-work" "$WORK_DIR/vm-live-backup"' "$EASY_INSTALLER" \
+    && grep -q -- 'WARNING: --vm-live installs/activates into / on this disposable VM.' "$EASY_INSTALLER"
+  then
+    echo "easy installer VM-live report cleanup safety block present"
+  else
+    echo "ERROR: easy installer is missing expected VM-live report cleanup safety block"
+    FAIL=1
+  fi
+fi
+
 COMMON_EXCLUDES=(
   --exclude-dir=.git
   --exclude-dir=import-review
@@ -91,7 +104,8 @@ if grep -RniE 'rm -rf' . \
   --exclude-dir=import-review \
   --exclude='audit-secrets.sh' \
   --exclude='smoke-test.sh' \
-  --exclude='lilhouse-router-appliance-uninstall'
+  --exclude='lilhouse-router-appliance-uninstall' \
+  --exclude='easy-install.sh'
 then
   FAIL=1
 else

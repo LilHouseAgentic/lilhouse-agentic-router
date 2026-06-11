@@ -410,6 +410,11 @@ echo
 echo "WARNING: --vm-live installs/activates into / on this disposable VM."
 
 echo
+echo "Resetting VM-live work reports..."
+rm -rf "$WORK_DIR/vm-live-prep" "$WORK_DIR/vm-live-work" "$WORK_DIR/vm-live-backup"
+rm -f "$WORK_DIR/vm-live-install-report.json"
+
+echo
 echo "Step 1/3: preparing full LilHouse appliance stack..."
 "$APPLIANCE_INSTALL" \
   --prepare-only \
