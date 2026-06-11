@@ -54,6 +54,12 @@ def service_state(name):
         return "unknown"
     return (r.stdout or r.stderr or "unknown").strip()
 
+def safe_sysfs_read(path):
+    try:
+        return path.read_text().strip() if path.exists() else "unknown"
+    except OSError:
+        return "unknown"
+
 def iface_state(name):
     carrier = Path(f"/sys/class/net/{name}/carrier")
     operstate = Path(f"/sys/class/net/{name}/operstate")
@@ -61,8 +67,8 @@ def iface_state(name):
     return {
         "name": name,
         "exists": exists,
-        "carrier": carrier.read_text().strip() if carrier.exists() else "unknown",
-        "operstate": operstate.read_text().strip() if operstate.exists() else "unknown",
+        "carrier": safe_sysfs_read(carrier),
+        "operstate": safe_sysfs_read(operstate),
     }
 
 def disk_summary(path):
