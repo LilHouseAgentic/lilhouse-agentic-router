@@ -197,6 +197,7 @@ if appliance:
     print(f"  appliance_cake_active={app_summary.get('appliance_cake_active')}")
     print(f"  appliance_dns_active={app_summary.get('appliance_dns_active')}")
     print(f"  appliance_firewall_active={app_summary.get('appliance_firewall_active')}")
+    print(f"  appliance_firewall_hardened={app_summary.get('appliance_firewall_hardened')}")
     print(f"  appliance_telemetry_active={app_summary.get('appliance_telemetry_active')}")
 
 print()
