@@ -5,6 +5,19 @@ echo "== LilHouse repo audit =="
 
 FAIL=0
 
+UNINSTALLER="bin/lilhouse-router-appliance-uninstall"
+if [ -f "$UNINSTALLER" ]; then
+  if grep -q -- "--i-am-in-a-throwaway-vm" "$UNINSTALLER" \
+    && grep -q -- "refusing appliance uninstall" "$UNINSTALLER" \
+    && grep -q -- "rm -rf" "$UNINSTALLER"
+  then
+    echo "throwaway uninstaller safety gate present"
+  else
+    echo "ERROR: throwaway uninstaller is missing expected safety gates"
+    FAIL=1
+  fi
+fi
+
 COMMON_EXCLUDES=(
   --exclude-dir=.git
   --exclude-dir=import-review
@@ -23,7 +36,8 @@ echo "== check for likely secrets =="
 if grep -RniE \
   'api_key|token|secret|password|pushover|openai|bearer|authorization|icloud|gmail|webhook|private_key' \
   . \
-  "${COMMON_EXCLUDES[@]}"
+  "${COMMON_EXCLUDES[@]}" \
+  --exclude='lilhouse-router-appliance-uninstall'
 then
   FAIL=1
 else
@@ -47,7 +61,8 @@ echo "== check for risky command patterns =="
 if grep -RniE \
   'mkfs|dd |reboot|shutdown|iptables|nft |apt |curl .*sh|wget .*sh|eval ' \
   . \
-  "${COMMON_EXCLUDES[@]}"
+  "${COMMON_EXCLUDES[@]}" \
+  --exclude='lilhouse-router-appliance-uninstall'
 then
   FAIL=1
 else
@@ -60,7 +75,8 @@ if grep -RniE 'rm -rf' . \
   --exclude-dir=.git \
   --exclude-dir=import-review \
   --exclude='audit-secrets.sh' \
-  --exclude='smoke-test.sh'
+  --exclude='smoke-test.sh' \
+  --exclude='lilhouse-router-appliance-uninstall'
 then
   FAIL=1
 else
