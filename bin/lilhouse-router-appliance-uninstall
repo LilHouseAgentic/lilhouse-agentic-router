@@ -49,6 +49,7 @@ systemctl disable --now lilhouse-storage-health.timer 2>/dev/null || true
 systemctl disable --now pihole-FTL 2>/dev/null || true
 systemctl disable --now unbound 2>/dev/null || true
 systemctl disable --now nftables 2>/dev/null || true
+pkill -f pihole-FTL 2>/dev/null || true
 
 echo
 echo "=== removing LilHouse systemd units and binaries ==="
@@ -70,11 +71,21 @@ rm -f /etc/systemd/network/20-lilhouse-lan.network
 rm -f /etc/dnsmasq.d/02-lilhouse-dhcp.conf
 rm -f /etc/unbound/unbound.conf.d/lilhouse.conf
 
+# VM test reset: remove the default LilHouse LAN address if present.
+for dev in $(ip -o -4 addr show | awk '$4 == "10.23.0.1/24" {print $2}' | sort -u); do
+  ip addr flush dev "$dev" 2>/dev/null || true
+done
+
 echo
 echo "=== removing Pi-hole install/config ==="
 rm -f /etc/systemd/system/pihole-FTL.service
+rm -f /etc/systemd/system/multi-user.target.wants/pihole-FTL.service
 rm -f /usr/bin/pihole-FTL
 rm -f /usr/local/bin/pihole
+rm -f /usr/bin/pihole
+rm -rf /run/pihole
+rm -f /run/pihole-FTL.pid
+rm -rf /var/lib/pihole
 rm -rf /etc/pihole
 rm -rf /etc/.pihole
 rm -rf /opt/pihole
