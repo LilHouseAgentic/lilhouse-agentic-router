@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+YES=0
+THROWAWAY_VM=0
+PURGE_PACKAGES=0
+
+usage() {
+  cat <<USAGE
+Usage:
+  sudo bin/lilhouse-router-appliance-uninstall --yes --i-am-in-a-throwaway-vm [options]
+
+Options:
+  --yes                     Required
+  --i-am-in-a-throwaway-vm   Required safety switch
+  --purge-packages           Also apt purge unbound/nftables/curl/dnsutils deps where possible
+USAGE
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --yes) YES=1; shift ;;
+    --i-am-in-a-throwaway-vm) THROWAWAY_VM=1; shift ;;
+    --purge-packages) PURGE_PACKAGES=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "ERROR: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "ERROR: uninstall must run as root." >&2
+  exit 2
+fi
+
+if [ "$YES" -ne 1 ] || [ "$THROWAWAY_VM" -ne 1 ]; then
+  echo "ERROR: refusing appliance uninstall without --yes --i-am-in-a-throwaway-vm" >&2
+  exit 2
+fi
+
+echo
+echo "LilHouse appliance test uninstall"
+echo "This removes LilHouse router appliance config from this throwaway VM."
+
+echo
+echo "=== stopping services ==="
+systemctl disable --now lilhouse-router-rollback.timer 2>/dev/null || true
+systemctl disable --now lilhouse-current-state.timer 2>/dev/null || true
+systemctl disable --now lilhouse-storage-health.timer 2>/dev/null || true
+systemctl disable --now pihole-FTL 2>/dev/null || true
+systemctl disable --now unbound 2>/dev/null || true
+systemctl disable --now nftables 2>/dev/null || true
+
+echo
+echo "=== removing LilHouse systemd units and binaries ==="
+rm -f /etc/systemd/system/lilhouse-current-state.service
+rm -f /etc/systemd/system/lilhouse-current-state.timer
+rm -f /etc/systemd/system/lilhouse-storage-health.service
+rm -f /etc/systemd/system/lilhouse-storage-health.timer
+rm -f /etc/systemd/system/lilhouse-router-rollback.service
+rm -f /etc/systemd/system/lilhouse-router-rollback.timer
+rm -f /etc/systemd/system/lilhouse-status.service
+rm -f /usr/local/bin/lilhouse-*
+rm -rf /etc/lilhouse
+
+echo
+echo "=== removing router config ==="
+rm -f /etc/nftables.conf
+rm -f /etc/sysctl.d/90-lilhouse-router-forwarding.conf
+rm -f /etc/systemd/network/20-lilhouse-lan.network
+rm -f /etc/dnsmasq.d/02-lilhouse-dhcp.conf
+rm -f /etc/unbound/unbound.conf.d/lilhouse.conf
+
+echo
+echo "=== removing Pi-hole install/config ==="
+rm -f /etc/systemd/system/pihole-FTL.service
+rm -f /usr/bin/pihole-FTL
+rm -f /usr/local/bin/pihole
+rm -rf /etc/pihole
+rm -rf /etc/.pihole
+rm -rf /opt/pihole
+rm -rf /var/www/html/admin
+rm -rf /var/log/pihole
+rm -rf /var/log/pihole-FTL.log
+
+userdel pihole 2>/dev/null || true
+groupdel pihole 2>/dev/null || true
+
+echo
+echo "=== daemon reload/reset ==="
+systemctl daemon-reload
+systemctl reset-failed || true
+
+if [ "$PURGE_PACKAGES" -eq 1 ] && command -v apt-get >/dev/null 2>&1; then
+  echo
+  echo "=== purging apt packages ==="
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get purge -y unbound || true
+  apt-get autoremove -y || true
+fi
+
+echo
+echo "=== remaining LilHouse/Pi-hole/Unbound state ==="
+systemctl list-unit-files | grep -Ei 'lilhouse|pihole|unbound' || true
+command -v pihole || true
+command -v pihole-FTL || true
+command -v unbound || true
+ls -ld /etc/pihole /etc/.pihole /etc/lilhouse 2>/dev/null || true
+
+echo
+echo "Uninstall/reset complete."
