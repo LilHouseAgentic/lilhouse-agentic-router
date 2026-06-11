@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from pathlib import Path
+
+
+REQUIRED_SUMMARY_TRUE = [
+    "appliance_prep_ok",
+    "appliance_required_services_active",
+    "appliance_cake_active",
+    "appliance_dns_active",
+    "appliance_web_lan_bound",
+    "appliance_web_wildcard_disabled",
+    "appliance_web_hardened",
+    "appliance_firewall_active",
+    "appliance_firewall_hardened",
+    "appliance_telemetry_active",
+]
+
+REQUIRED_FIREWALL_TRUE = [
+    "hardened",
+    "has_filter_table",
+    "has_nat_table",
+    "wan_input_policy_drop",
+    "lan_interface_accept",
+    "lan_to_wan_forward",
+    "nat_masquerade",
+    "wan_dhcp_client_allowed",
+    "wan_admin_ports_not_explicitly_allowed",
+]
+
+REQUIRED_DNS_TRUE = [
+    "active",
+    "unbound_active",
+    "pihole_ftl_active",
+    "web_lan_bound",
+    "web_wildcard_disabled",
+    "web_hardened",
+]
+
+REQUIRED_CAKE_TRUE = [
+    "active",
+    "env_file_exists",
+    "wan_qdisc_contains_cake",
+    "ifb_qdisc_contains_cake",
+    "ifb_link_present",
+]
+
+
+def check_bool(path, value, failures):
+    if value is not True:
+        failures.append(f"{path}=not true ({value!r})")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--report", required=True)
+    args = ap.parse_args()
+
+    report_path = Path(args.report)
+    report = json.loads(report_path.read_text())
+
+    failures = []
+
+    if report.get("ok") is not True:
+        failures.append(f"top-level ok={report.get('ok')!r}")
+
+    summary = report.get("summary", {})
+    for key in REQUIRED_SUMMARY_TRUE:
+        check_bool(f"summary.{key}", summary.get(key), failures)
+
+    appliance = report.get("appliance_prep", {})
+    check_bool("appliance_prep.ok", appliance.get("ok"), failures)
+
+    firewall = appliance.get("firewall", {})
+    for key in REQUIRED_FIREWALL_TRUE:
+        check_bool(f"appliance_prep.firewall.{key}", firewall.get(key), failures)
+
+    dns = appliance.get("dns", {})
+    for key in REQUIRED_DNS_TRUE:
+        check_bool(f"appliance_prep.dns.{key}", dns.get(key), failures)
+
+    cake = appliance.get("cake", {})
+    for key in REQUIRED_CAKE_TRUE:
+        check_bool(f"appliance_prep.cake.{key}", cake.get(key), failures)
+
+    safety = report.get("safety", {})
+    check_bool("safety.appliance_prep_live_changes", safety.get("appliance_prep_live_changes"), failures)
+    check_bool("safety.touches_cake_runtime", safety.get("touches_cake_runtime"), failures)
+    check_bool("safety.touches_dns_runtime", safety.get("touches_dns_runtime"), failures)
+    check_bool("safety.touches_firewall_runtime", safety.get("touches_firewall_runtime"), failures)
+
+    result = {
+        "schema": "lilhouse.alpha_readiness.v1",
+        "ok": not failures,
+        "report": str(report_path),
+        "checked_summary_fields": REQUIRED_SUMMARY_TRUE,
+        "failure_count": len(failures),
+        "failures": failures,
+        "status": "alpha-ready" if not failures else "not-alpha-ready",
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if not failures else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
