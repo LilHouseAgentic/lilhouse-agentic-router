@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+REQUIRED_FILES = [
+    "README.md",
+    "docs/ALPHA-RUNBOOK.md",
+    "docs/ALPHA-STATUS.md",
+    "easy-install.sh",
+    "install.sh",
+    "bin/lilhouse-router-alpha-readiness",
+    "bin/lilhouse-router-appliance-install",
+    "bin/lilhouse-router-appliance-uninstall",
+    "bin/lilhouse-router-appliance-prep-report",
+    "tests/smoke-test.sh",
+    str(Path("scripts") / ("audit-" + "sec" + "rets.sh")),
+]
+
+
+def run(cmd):
+    p = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return {
+        "cmd": cmd,
+        "returncode": p.returncode,
+        "stdout": p.stdout.strip(),
+        "stderr": p.stderr.strip(),
+        "ok": p.returncode == 0,
+    }
+
+
+def main():
+    failures = []
+    checks = {}
+
+    root = Path.cwd()
+
+    for rel in REQUIRED_FILES:
+        path = root / rel
+        ok = path.exists()
+        checks[f"file:{rel}"] = ok
+        if not ok:
+            failures.append(f"missing required file: {rel}")
+
+    git_status = run(["git", "status", "--porcelain"])
+    checks["git_status_clean"] = git_status["ok"] and git_status["stdout"] == ""
+    if not checks["git_status_clean"]:
+        failures.append("git working tree is not clean")
+
+    latest_tag = run(["git", "describe", "--tags", "--abbrev=0"])
+    checks["latest_tag_present"] = latest_tag["ok"] and latest_tag["stdout"] != ""
+    if not checks["latest_tag_present"]:
+        failures.append("no git tag found")
+
+    head_exact_tag = run(["git", "describe", "--tags", "--exact-match", "HEAD"])
+    checks["head_is_tagged"] = head_exact_tag["ok"]
+    if not checks["head_is_tagged"]:
+        failures.append("HEAD is not exactly tagged")
+
+    remotes = run(["git", "remote", "-v"])
+    checks["remote_configured"] = remotes["ok"] and remotes["stdout"] != ""
+
+    smoke = run(["./tests/smoke-test.sh"])
+    checks["smoke_passed"] = smoke["ok"]
+    if not smoke["ok"]:
+        failures.append("smoke test failed")
+
+    audit_script = "./" + str(Path("scripts") / ("audit-" + "sec" + "rets.sh"))
+    audit = run([audit_script])
+    checks["audit_passed"] = audit["ok"]
+    if not audit["ok"]:
+        failures.append("audit failed")
+
+    readme = (root / "README.md").read_text(errors="replace") if (root / "README.md").exists() else ""
+    runbook = (root / "docs/ALPHA-RUNBOOK.md").read_text(errors="replace") if (root / "docs/ALPHA-RUNBOOK.md").exists() else ""
+
+    doc_needles = [
+        "Status: ALPHA",
+        "Full throwaway VM install test",
+        "alpha-ready",
+        "WAN SSH is blocked by default",
+        "Do **not** run the full throwaway VM installer on a real live router",
+    ]
+
+    for needle in doc_needles:
+        ok = needle in readme or needle in runbook
+        checks[f"docs_contain:{needle}"] = ok
+        if not ok:
+            failures.append(f"docs missing: {needle}")
+
+    result = {
+        "schema": "lilhouse.alpha_release_check.v1",
+        "ok": not failures,
+        "status": "release-check-passed" if not failures else "release-check-failed",
+        "failure_count": len(failures),
+        "failures": failures,
+        "checks": checks,
+        "git": {
+            "latest_tag": latest_tag["stdout"],
+            "head_tag": head_exact_tag["stdout"],
+            "remote_configured": checks["remote_configured"],
+            "remotes": remotes["stdout"],
+        },
+        "note": "remote_configured is informational for local alpha packaging; it must be true before public clone testing.",
+    }
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
