@@ -131,7 +131,8 @@ Name=$LAN
 
 [Network]
 Address=$LAN_CIDR
-IPForward=yes
+IPv4Forwarding=yes
+IPv6Forwarding=yes
 ConfigureWithoutCarrier=yes
 LinkLocalAddressing=yes
 NETEOF
