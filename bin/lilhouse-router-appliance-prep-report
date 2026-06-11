@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def cmd_ok(args):
+    return subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
+def cmd_text(args):
+    p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    return p.stdout.strip()
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--report", required=True)
+    args = ap.parse_args()
+
+    path = Path(args.report)
+    report = json.loads(path.read_text())
+
+    required_services = [
+        "systemd-networkd",
+        "nftables",
+        "unbound",
+        "pihole-FTL",
+        "lilhouse-cake.service",
+        "lilhouse-current-state.timer",
+        "lilhouse-storage-health.timer",
+    ]
+
+    services = {
+        svc: cmd_ok(["systemctl", "is-active", "--quiet", svc])
+        for svc in required_services
+    }
+
+    cake_env = Path("/etc/lilhouse/cake.env")
+    cake_env_exists = cake_env.exists()
+
+    wan = "eth0"
+    ifb = "ifb0"
+
+    if cake_env_exists:
+        for line in cake_env.read_text(errors="replace").splitlines():
+            if line.startswith("LILHOUSE_CAKE_WAN="):
+                wan = line.split("=", 1)[1].strip()
+            elif line.startswith("LILHOUSE_CAKE_IFB="):
+                ifb = line.split("=", 1)[1].strip()
+
+    wan_qdisc = cmd_text(["tc", "qdisc", "show", "dev", wan])
+    ifb_qdisc = cmd_text(["tc", "qdisc", "show", "dev", ifb])
+    ifb_link = cmd_text(["ip", "-br", "link", "show", ifb])
+
+    cake_active = (
+        services.get("lilhouse-cake.service", False)
+        and cake_env_exists
+        and "cake" in wan_qdisc
+        and "cake" in ifb_qdisc
+    )
+
+    dns_active = services.get("unbound", False) and services.get("pihole-FTL", False)
+    firewall_active = services.get("nftables", False)
+    telemetry_active = (
+        services.get("lilhouse-current-state.timer", False)
+        and services.get("lilhouse-storage-health.timer", False)
+    )
+    required_services_active = all(services.values())
+    appliance_prep_ok = (
+        cake_active
+        and dns_active
+        and firewall_active
+        and telemetry_active
+        and required_services_active
+    )
+
+    report["appliance_prep"] = {
+        "schema": "lilhouse.appliance_prep.v1",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "mode": "vm-live-appliance-prep",
+        "ok": appliance_prep_ok,
+        "services": services,
+        "cake": {
+            "enabled": True,
+            "active": cake_active,
+            "env_file": str(cake_env),
+            "env_file_exists": cake_env_exists,
+            "wan": wan,
+            "ifb": ifb,
+            "wan_qdisc_contains_cake": "cake" in wan_qdisc,
+            "ifb_qdisc_contains_cake": "cake" in ifb_qdisc,
+            "ifb_link_present": bool(ifb_link) and "does not exist" not in ifb_link.lower(),
+        },
+        "dns": {
+            "unbound_active": services.get("unbound", False),
+            "pihole_ftl_active": services.get("pihole-FTL", False),
+            "active": dns_active,
+        },
+        "firewall": {
+            "nftables_active": firewall_active,
+        },
+        "telemetry": {
+            "current_state_timer_active": services.get("lilhouse-current-state.timer", False),
+            "storage_health_timer_active": services.get("lilhouse-storage-health.timer", False),
+            "active": telemetry_active,
+        },
+        "safety": {
+            "appliance_prep": True,
+            "live_changes": True,
+            "touches_cake_runtime": cake_active,
+            "touches_dns_runtime": dns_active,
+            "touches_firewall_runtime": firewall_active,
+            "starts_router_services": True,
+            "target_live_root": True,
+            "vm_live_only": True,
+        },
+    }
+
+    summary = report.setdefault("summary", {})
+    summary["appliance_prep_ok"] = appliance_prep_ok
+    summary["appliance_required_services_active"] = required_services_active
+    summary["appliance_cake_active"] = cake_active
+    summary["appliance_dns_active"] = dns_active
+    summary["appliance_firewall_active"] = firewall_active
+    summary["appliance_telemetry_active"] = telemetry_active
+
+    safety = report.setdefault("safety", {})
+    safety["appliance_prep_live_changes"] = True
+    safety["touches_cake_runtime"] = cake_active
+    safety["touches_dns_runtime"] = dns_active
+    safety["touches_firewall_runtime"] = firewall_active
+    safety["starts_router_services"] = True
+
+    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+
+
+if __name__ == "__main__":
+    main()

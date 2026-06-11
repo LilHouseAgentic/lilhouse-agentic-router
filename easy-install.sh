@@ -361,6 +361,7 @@ MOBILE_ALERTS="${MOBILE_ALERTS:-no}"
 
 BUNDLE="$REPO_DIR/bin/lilhouse-router-vm-readiness-bundle"
 LIVE_ORCH="$REPO_DIR/bin/lilhouse-router-live-orchestrator"
+APPLIANCE_PREP_REPORTER="$REPO_DIR/bin/lilhouse-router-appliance-prep-report"
 APPLIANCE_INSTALL="$REPO_DIR/bin/lilhouse-router-appliance-install"
 
 test -x "$BUNDLE" || { echo "ERROR: missing executable: $BUNDLE" >&2; exit 2; }
@@ -450,4 +451,5 @@ echo "Step 3/3: executing guarded live chain against / on throwaway VM..."
   --operator-phrase "$LIVE_OPERATOR_PHRASE" \
   --out "$OUT"
 
+"$APPLIANCE_PREP_REPORTER" --report "$OUT"
 print_result "$OUT" "$ANSWERS"
