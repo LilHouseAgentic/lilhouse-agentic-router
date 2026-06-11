@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WAN="${WAN:-eth0}"
+
+usage() {
+  cat <<EOF
+Usage:
+  sudo lilhouse-router-vm-temp-ssh --wan eth0 --yes --i-am-in-a-throwaway-vm
+
+Opens a temporary runtime-only WAN SSH rule for throwaway VM testing.
+This is not persistent. It is intentionally not production-hardened.
+EOF
+}
+
+YES=0
+THROWAWAY=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --wan)
+      WAN="${2:?missing --wan value}"
+      shift 2
+      ;;
+    --yes)
+      YES=1
+      shift
+      ;;
+    --i-am-in-a-throwaway-vm)
+      THROWAWAY=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "ERROR: run as root" >&2
+  exit 2
+fi
+
+if [ "$YES" -ne 1 ] || [ "$THROWAWAY" -ne 1 ]; then
+  echo "ERROR: refusing to open WAN SSH without --yes --i-am-in-a-throwaway-vm" >&2
+  exit 2
+fi
+
+if ! nft list table inet lilhouse_filter >/dev/null 2>&1; then
+  echo "ERROR: missing nft table inet lilhouse_filter" >&2
+  exit 2
+fi
+
+nft insert rule inet lilhouse_filter input iifname "$WAN" tcp dport 22 accept
+
+echo "Temporary VM SSH rule added on WAN=$WAN"
+echo "This is runtime-only and will disappear when nftables reloads/restarts."
+echo "Firewall hardened proof should be considered false while this rule exists."

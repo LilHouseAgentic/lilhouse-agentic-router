@@ -31,6 +31,19 @@ if [ -f "$APPLIANCE_INSTALLER" ]; then
   fi
 fi
 
+VM_TEMP_SSH="bin/lilhouse-router-vm-temp-ssh"
+if [ -f "$VM_TEMP_SSH" ]; then
+  if grep -q -- "--i-am-in-a-throwaway-vm" "$VM_TEMP_SSH" \
+    && grep -q -- "refusing to open WAN SSH" "$VM_TEMP_SSH" \
+    && grep -q -- "runtime-only" "$VM_TEMP_SSH" \
+    && grep -q -- "will disappear when nftables reloads/restarts" "$VM_TEMP_SSH"; then
+    echo "throwaway VM temp SSH safety gate present"
+  else
+    echo "ERROR: VM temp SSH helper is missing expected safety gates"
+    found=1
+  fi
+fi
+
 EASY_INSTALLER="easy-install.sh"
 if [ -f "$EASY_INSTALLER" ]; then
   if grep -q -- 'Resetting VM-live work reports' "$EASY_INSTALLER" \
@@ -90,7 +103,8 @@ if grep -RniE \
   . \
   "${COMMON_EXCLUDES[@]}" \
   --exclude='lilhouse-router-appliance-uninstall' \
-  --exclude='lilhouse-router-appliance-install'
+  --exclude='lilhouse-router-appliance-install' \
+  --exclude='lilhouse-router-vm-temp-ssh'
 then
   FAIL=1
 else
