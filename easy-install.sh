@@ -61,7 +61,7 @@ ask_default() {
   prompt="$1"
   default="$2"
   var=""
-  printf "%s [%s]: " "$prompt" "$default"
+  printf "%s [%s]: " "$prompt" "$default" >&2
   read -r var || var=""
   if [ -z "$var" ]; then
     var="$default"
@@ -77,7 +77,7 @@ ask_yes_no() {
     case "$ans" in
       y|Y|yes|YES|Yes) printf "yes"; return 0 ;;
       n|N|no|NO|No) printf "no"; return 0 ;;
-      *) echo "Please answer yes or no." ;;
+      *) echo "Please answer yes or no." >&2 ;;
     esac
   done
 }
