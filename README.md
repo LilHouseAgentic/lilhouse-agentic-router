@@ -1,87 +1,122 @@
 # LilHouse Agentic Router
 
-LilHouse Agentic Router turns a Raspberry Pi router into a self-monitoring, permission-gated, agentic NetOps appliance.
+LilHouse Agentic Router is an alpha-stage Debian router appliance installer and safety framework.
 
-It uses a crew of small workers to observe the network, collect telemetry, detect patterns, produce reports, and propose safe improvements.
+It builds a small home-router stack around Pi-hole + Unbound DNS, nftables firewalling/NAT, CAKE/SQM traffic shaping, observe-only LilHouse telemetry workers, and a guarded install flow with backup, rollback guard, post-apply health checks, and readiness reporting.
 
-Optional AI workers can draft upgrade plans, but risky actions are gated through approvals and safety checks.
+## Current status
 
-## Status
+**Status: ALPHA**
 
-Early public packaging work.
+The current alpha path has been proven in a disposable Debian VM using the full throwaway install flow.
 
-This repository is being extracted from a live Raspberry Pi router prototype.
+This is not production-polished yet. It is a working, safety-gated appliance foundation for testing, review, and controlled iteration.
 
-## What it does
+## Alpha proof
 
-- Monitors WAN health, latency, packet loss, and route state
-- Tracks CAKE/SQM health and bandwidth behaviour
-- Watches DNS services such as Pi-hole and Unbound
-- Checks Docker container health
-- Detects interface drops, errors, and link changes
-- Watches storage, mounts, logs, and system resources
-- Provides a portable storage health worker
-- Maintains event, action, and proposal ledgers
-- Supports permission-gated upgrade proposals
-- Supports optional AI planning with bring-your-own API key
+The alpha VM path verifies:
 
-## What it is not
+- full appliance preparation
+- Pi-hole + Unbound DNS
+- Pi-hole web UI bound to the LAN address
+- nftables WAN hardening
+- LAN-to-WAN NAT
+- CAKE runtime installed and active
+- LilHouse telemetry timers active
+- guarded live chain completion
+- rollback guard/cancel path
+- alpha readiness checker returning ok=true
 
-This is not a finished commercial router firmware.
+## Default security posture
 
-This is not an unchecked self-modifying router.
+The default appliance firewall posture is:
 
-This is not designed to blindly apply AI-generated commands.
+- WAN inbound policy: drop
+- LAN interface: trusted/admin side
+- LAN-to-WAN forwarding: allowed
+- NAT masquerade: enabled
+- WAN admin ports: not explicitly allowed
+- Pi-hole web: LAN-bound, not wildcard web exposed
 
-## Modes
+SSH from the WAN side is intentionally not enabled by default.
 
-- Observe mode: collect telemetry and reports only
-- Propose mode: suggest actions, but do not apply them
-- Agentic mode: optional AI proposal/planning workers with approval gates
+## Important warning
 
-## Safety model
+Do **not** run the full throwaway VM installer on a real live router.
 
-- Workers are read-only by default
-- AI is optional
-- Generated plans are proposals, not commands
-- Destructive actions are disabled by default
-- Approved actions pass through a safety gate
-- Notifications are rate-limited
-- Only the highest active brain should notify the user
+The full install mode is for disposable VM testing only. Real-router mode is still dry-run / preview only until the live-production guardrails are completed.
 
-## Hardware target
+For Jordy's current live Pi router: use this repo as source/dev/test material only. Do not run the appliance installer or uninstaller on the live Pi.
 
-- Raspberry Pi 5
-- Raspberry Pi OS / Debian Bookworm
-- WAN on one Ethernet interface
-- LAN on another Ethernet interface
-- CAKE/SQM
-- Pi-hole / Unbound
-- Optional Docker monitoring
-- Optional Starlink monitoring
+## Quick alpha VM test
 
-## License
+On a disposable Debian VM:
 
-MIT
+    ./easy-install.sh
 
-## Router deployment dry-run wizard
+Choose:
 
-Router deployment is planned, but apply mode is intentionally blocked for now.
+    2) Full throwaway VM install test
 
-A safe dry-run wizard is available:
+Typical VM answers:
 
-    ./install.sh --mode router-deploy --wizard --dry-run
+    WAN interface [eth0]:
+    LAN interface [eth1]:
+    Configure mobile push alerts now? [no]:
+    Continue and install into / on this disposable VM? [no]: yes
 
-This command does not change the system.
+After install:
 
-It generates:
+    ./bin/lilhouse-router-appliance-prep-report --report /tmp/lilhouse-first-install/vm-live-install-report.json --wan eth0 --lan eth1
+    ./bin/lilhouse-router-alpha-readiness --report /tmp/lilhouse-first-install/vm-live-install-report.json
 
-- an interface report
-- a router deployment JSON plan
-- a human-readable plan summary
+Expected alpha result:
 
-To choose the output location:
+    failure_count=0
+    failures=[]
+    ok=true
+    status=alpha-ready
 
-    ./install.sh --mode router-deploy --wizard --dry-run --out-dir /tmp/lilhouse-router-plan
+## Key scripts
 
-Real router deployment will be added in stages behind explicit confirmation, backups, validation, and rollback support.
+- easy-install.sh — first-run installer / VM test entrypoint
+- bin/lilhouse-router-appliance-install — installs the required appliance stack
+- bin/lilhouse-router-appliance-uninstall — throwaway VM reset/uninstall helper
+- bin/lilhouse-router-appliance-prep-report — runtime appliance proof report
+- bin/lilhouse-router-alpha-readiness — alpha readiness checker
+- bin/lilhouse-router-live-orchestrator — guarded live chain executor
+- scripts/audit-secrets.sh — repo safety/secret/risky-pattern audit
+- tests/smoke-test.sh — broad repo smoke test
+
+## Development checks
+
+Before committing:
+
+    ./tests/smoke-test.sh
+    ./scripts/audit-secrets.sh
+
+Both should pass.
+
+## Known limitations
+
+This alpha is not yet a one-click production router installer.
+
+Known limitations:
+
+- real-router live apply remains intentionally restricted
+- WAN SSH is blocked by default
+- no public alpha helper opens WAN SSH
+- dynamic CAKE tuning is not yet part of the alpha installer path
+- full recovery/rollback has been VM-proven, but not production-certified
+- UI/dashboard polish is not part of alpha scope yet
+- docs are still being expanded
+
+## Version milestone
+
+The core appliance alpha path was proven at:
+
+    v0.2.96-live-preview-networkd-forwarding
+
+Next presentation milestone:
+
+    v0.3.0-alpha
