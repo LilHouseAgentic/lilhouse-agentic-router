@@ -89,6 +89,35 @@ detect_interfaces() {
   echo
 }
 
+install_base_prereqs() {
+  echo
+  echo "Installing base prerequisites..."
+
+  if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y \
+      ca-certificates \
+      curl \
+      iproute2 \
+      nftables \
+      procps \
+      python3 \
+      systemd
+  else
+    echo "No apt-get found; skipping package install."
+  fi
+}
+
+install_lilhouse_core() {
+  echo
+  echo "Installing LilHouse core files..."
+
+  "$REPO_DIR/install.sh" \
+    --mode observe-only \
+    --no-systemd
+}
+
 write_answers_json() {
   answers="$1"
   python3 - "$answers" "$MODE" "$WAN" "$LAN" "$CAKE" "$AI_AGENT" "$MOBILE_ALERTS" "$WORK_DIR" <<'PY'
@@ -376,7 +405,17 @@ fi
 
 echo
 echo "WARNING: --vm-live installs/activates into / on this disposable VM."
-echo "Step 1/2: generating VM preview/preflight..."
+
+echo
+echo "Step 1/4: installing base prerequisites..."
+install_base_prereqs
+
+echo
+echo "Step 2/4: installing LilHouse core files..."
+install_lilhouse_core
+
+echo
+echo "Step 3/4: generating VM preview/preflight..."
 PREP_WORK="$WORK_DIR/vm-live-prep"
 PREP_REPORT="$WORK_DIR/vm-live-prep-report.json"
 
@@ -389,7 +428,7 @@ PREP_REPORT="$WORK_DIR/vm-live-prep-report.json"
   --out "$PREP_REPORT" >/tmp/lilhouse-easy-install-vm-live-prep-last.json
 
 echo
-echo "Step 2/2: executing guarded live chain against / on throwaway VM..."
+echo "Step 4/4: executing guarded live chain against / on throwaway VM..."
 
 "$LIVE_ORCH" \
   --preflight-report "$PREP_WORK/vm-preflight.json" \
