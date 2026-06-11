@@ -46,10 +46,32 @@ echo "=== stopping services ==="
 systemctl disable --now lilhouse-router-rollback.timer 2>/dev/null || true
 systemctl disable --now lilhouse-current-state.timer 2>/dev/null || true
 systemctl disable --now lilhouse-storage-health.timer 2>/dev/null || true
+systemctl disable --now lilhouse-cake.service 2>/dev/null || true
 systemctl disable --now pihole-FTL 2>/dev/null || true
 systemctl disable --now unbound 2>/dev/null || true
 systemctl disable --now nftables 2>/dev/null || true
 pkill -f pihole-FTL 2>/dev/null || true
+
+echo
+echo "=== removing CAKE/SQM runtime ==="
+if [ -f /etc/lilhouse/cake.env ]; then
+  # shellcheck disable=SC1091
+  . /etc/lilhouse/cake.env || true
+
+  WAN="${LILHOUSE_CAKE_WAN:-}"
+  IFB="${LILHOUSE_CAKE_IFB:-ifb0}"
+
+  if [ -n "$WAN" ] && ip link show dev "$WAN" >/dev/null 2>&1; then
+    tc qdisc del dev "$WAN" root 2>/dev/null || true
+    tc qdisc del dev "$WAN" clsact 2>/dev/null || true
+  fi
+
+  if [ -n "$IFB" ] && ip link show dev "$IFB" >/dev/null 2>&1; then
+    tc qdisc del dev "$IFB" root 2>/dev/null || true
+    ip link set dev "$IFB" down 2>/dev/null || true
+    ip link delete "$IFB" type ifb 2>/dev/null || true
+  fi
+fi
 
 echo
 echo "=== removing LilHouse systemd units and binaries ==="
@@ -57,9 +79,11 @@ rm -f /etc/systemd/system/lilhouse-current-state.service
 rm -f /etc/systemd/system/lilhouse-current-state.timer
 rm -f /etc/systemd/system/lilhouse-storage-health.service
 rm -f /etc/systemd/system/lilhouse-storage-health.timer
+rm -f /etc/systemd/system/lilhouse-cake.service
 rm -f /etc/systemd/system/lilhouse-router-rollback.service
 rm -f /etc/systemd/system/lilhouse-router-rollback.timer
 rm -f /etc/systemd/system/lilhouse-status.service
+rm -f /usr/local/sbin/lilhouse-cake-apply
 rm -f /usr/local/bin/lilhouse-*
 rm -rf /etc/lilhouse
 
@@ -111,7 +135,7 @@ fi
 
 echo
 echo "=== remaining LilHouse/Pi-hole/Unbound state ==="
-systemctl list-unit-files | grep -Ei 'lilhouse|pihole|unbound' || true
+systemctl list-unit-files | grep -Ei 'lilhouse|pihole|unbound|cake' || true
 command -v pihole || true
 command -v pihole-FTL || true
 command -v unbound || true
