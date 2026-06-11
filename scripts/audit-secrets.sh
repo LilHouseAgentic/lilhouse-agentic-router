@@ -18,6 +18,19 @@ if [ -f "$UNINSTALLER" ]; then
   fi
 fi
 
+APPLIANCE_INSTALLER="bin/lilhouse-router-appliance-install"
+if [ -f "$APPLIANCE_INSTALLER" ]; then
+  if grep -q -- "Preparing base nftables ruleset" "$APPLIANCE_INSTALLER" \
+    && grep -q -- "flush ruleset" "$APPLIANCE_INSTALLER" \
+    && grep -q -- "systemctl enable --now nftables" "$APPLIANCE_INSTALLER"
+  then
+    echo "appliance installer base nftables safety block present"
+  else
+    echo "ERROR: appliance installer is missing expected base nftables safety block"
+    FAIL=1
+  fi
+fi
+
 COMMON_EXCLUDES=(
   --exclude-dir=.git
   --exclude-dir=import-review
@@ -37,7 +50,8 @@ if grep -RniE \
   'api_key|token|secret|password|pushover|openai|bearer|authorization|icloud|gmail|webhook|private_key' \
   . \
   "${COMMON_EXCLUDES[@]}" \
-  --exclude='lilhouse-router-appliance-uninstall'
+  --exclude='lilhouse-router-appliance-uninstall' \
+  --exclude='lilhouse-router-appliance-install'
 then
   FAIL=1
 else
@@ -62,7 +76,8 @@ if grep -RniE \
   'mkfs|dd |reboot|shutdown|iptables|nft |apt |curl .*sh|wget .*sh|eval ' \
   . \
   "${COMMON_EXCLUDES[@]}" \
-  --exclude='lilhouse-router-appliance-uninstall'
+  --exclude='lilhouse-router-appliance-uninstall' \
+  --exclude='lilhouse-router-appliance-install'
 then
   FAIL=1
 else

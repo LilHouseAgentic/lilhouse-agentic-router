@@ -277,7 +277,15 @@ main() {
   configure_pihole
 
   systemctl daemon-reload
-  systemctl enable --now nftables
+  echo
+echo "=== Preparing base nftables ruleset ==="
+cat > /etc/nftables.conf <<'NFT'
+#!/usr/sbin/nft -f
+
+flush ruleset
+NFT
+nft -f /etc/nftables.conf
+systemctl enable --now nftables
   systemctl enable --now lilhouse-current-state.timer
   systemctl enable --now lilhouse-storage-health.timer
 
