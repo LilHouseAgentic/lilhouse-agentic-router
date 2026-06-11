@@ -187,6 +187,18 @@ for key in [
 ]:
     if key in safety:
         print(f"{key}={safety.get(key)}")
+
+appliance = report.get("appliance_prep", {})
+if appliance:
+    app_summary = report.get("summary", {})
+    print()
+    print("Appliance prep:")
+    print(f"  appliance_prep_ok={app_summary.get('appliance_prep_ok')}")
+    print(f"  appliance_cake_active={app_summary.get('appliance_cake_active')}")
+    print(f"  appliance_dns_active={app_summary.get('appliance_dns_active')}")
+    print(f"  appliance_firewall_active={app_summary.get('appliance_firewall_active')}")
+    print(f"  appliance_telemetry_active={app_summary.get('appliance_telemetry_active')}")
+
 print()
 print("Selected features:")
 for name, enabled in answers.get("features", {}).items():
