@@ -58,6 +58,8 @@ def main():
     ifb_qdisc = cmd_text(["tc", "qdisc", "show", "dev", ifb])
     ifb_link = cmd_text(["ip", "-br", "link", "show", ifb])
     nft_ruleset = cmd_text(["nft", "list", "ruleset"])
+    pihole_web_port = cmd_text(["pihole-FTL", "--config", "webserver.port"])
+    socket_table = cmd_text(["ss", "-lntup"])
 
     cake_active = (
         services.get("lilhouse-cake.service", False)
@@ -67,6 +69,27 @@ def main():
     )
 
     dns_active = services.get("unbound", False) and services.get("pihole-FTL", False)
+    expected_web_port = f"{lan_ip}:80o,{lan_ip}:443os" if (lan_ip := "10.23.0.1") else ""
+    # Prefer the LAN IP from the appliance config when present.
+    lan_ip_file = Path("/etc/lilhouse/router.env")
+    if lan_ip_file.exists():
+        for line in lan_ip_file.read_text(errors="replace").splitlines():
+            if line.startswith("LILHOUSE_LAN_IP="):
+                lan_ip = line.split("=", 1)[1].strip()
+                expected_web_port = f"{lan_ip}:80o,{lan_ip}:443os"
+    web_lan_bound = pihole_web_port.strip() == expected_web_port
+    web_wildcard_socket = any(
+        bad in socket_table
+        for bad in [
+            "0.0.0.0:80",
+            "0.0.0.0:443",
+            "[::]:80",
+            "[::]:443",
+        ]
+    )
+    web_wildcard_disabled = not web_wildcard_socket
+    web_hardened = web_lan_bound and web_wildcard_disabled
+
     firewall_active = services.get("nftables", False)
     firewall_has_filter_table = "table inet lilhouse_filter" in nft_ruleset
     firewall_has_nat_table = "table ip lilhouse_nat" in nft_ruleset
@@ -138,6 +161,12 @@ def main():
             "unbound_active": services.get("unbound", False),
             "pihole_ftl_active": services.get("pihole-FTL", False),
             "active": dns_active,
+            "webserver_port": pihole_web_port,
+            "expected_webserver_port": expected_web_port,
+            "web_lan_bound": web_lan_bound,
+            "web_wildcard_socket": web_wildcard_socket,
+            "web_wildcard_disabled": web_wildcard_disabled,
+            "web_hardened": web_hardened,
         },
         "firewall": {
             "nftables_active": firewall_active,
@@ -175,6 +204,9 @@ def main():
     summary["appliance_required_services_active"] = required_services_active
     summary["appliance_cake_active"] = cake_active
     summary["appliance_dns_active"] = dns_active
+    summary["appliance_web_lan_bound"] = web_lan_bound
+    summary["appliance_web_wildcard_disabled"] = web_wildcard_disabled
+    summary["appliance_web_hardened"] = web_hardened
     summary["appliance_firewall_active"] = firewall_active
     summary["appliance_firewall_hardened"] = firewall_hardened
     summary["appliance_telemetry_active"] = telemetry_active

@@ -230,8 +230,9 @@ dhcp-option=option:router,$LAN_IP
 dhcp-option=option:dns-server,$LAN_IP
 DNSMASQEOF
 
-  # Pi-hole v6/FTL preferred config path. If this fails, the installer must fail.
+  # Pi-hole v6/FTL preferred config path. If these fail, the installer must fail.
   pihole-FTL --config dns.upstreams '[ "127.0.0.1#5335" ]'
+  pihole-FTL --config webserver.port "${LAN_IP}:80o,${LAN_IP}:443os"
 
   systemctl enable pihole-FTL
   systemctl restart pihole-FTL
