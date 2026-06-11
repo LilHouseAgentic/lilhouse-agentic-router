@@ -5,6 +5,7 @@ REPO_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 MODE=""
 YES=0
+THROWAWAY_VM=0
 WAN=""
 LAN=""
 WORK_DIR="/tmp/lilhouse-first-install"
@@ -14,6 +15,7 @@ AI_AGENT=""
 MOBILE_ALERTS=""
 
 VM_BYPASS_KEY="I understand VM NIC bypass is not valid for live router approval"
+LIVE_OPERATOR_PHRASE="I understand this may temporarily interrupt my network"
 
 usage() {
   cat <<EOF
@@ -22,26 +24,32 @@ LilHouse Router easy installer
 Interactive public first-run:
   ./easy-install.sh
 
-Non-interactive VM/customer-simulation mode:
+Safe VM/customer simulation:
   ./easy-install.sh --vm --yes
+
+Full throwaway VM install test:
+  ./easy-install.sh --vm-live --yes --i-am-in-a-throwaway-vm
 
 Options:
   --wizard          Run guided first-run wizard
-  --vm              Run VM first-install acceptance mode
+  --vm              Run VM first-install simulation only
+  --vm-live         Actually install/activate into / on a disposable VM
+  --i-am-in-a-throwaway-vm
+                    Required with --vm-live
   --yes             Non-interactive confirmation
   --wan IFACE       WAN interface
   --lan IFACE       LAN interface
   --cake yes|no     Enable CAKE/SQM in generated plan
   --ai yes|no       Enable local agent/AI planning in generated plan
-  --mobile-alerts yes|no Enable mobile push alert config in generated plan
+  --mobile-alerts yes|no
+                    Enable mobile push alert config in generated plan
   --work-dir DIR    Work/report directory, default: /tmp/lilhouse-first-install
   --out FILE        Write final JSON report to FILE
 
 Safety:
-  This installer defaults to dry-run / simulation.
-  VM mode is for first-install testing only.
-  VM NIC bypass is not valid for live router approval.
-  This command does not execute live router deployment.
+  --vm is safe simulation only.
+  --vm-live really installs/activates into / and is only for disposable VMs.
+  Real router installs remain separate and guarded.
 EOF
 }
 
@@ -102,15 +110,61 @@ data = {
         "mobile_alerts": mobile_alerts == "yes",
     },
     "safety": {
-        "live_apply": False,
-        "dry_run_first": True,
+        "vm_simulation": mode == "vm",
+        "throwaway_vm_live_install": mode == "vm-live",
+        "real_router_live_install": False,
         "vm_nic_bypass_valid_for_live": False,
     },
     "work_dir": work_dir,
 }
 Path(path).parent.mkdir(parents=True, exist_ok=True)
 Path(path).write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-print(path)
+PY
+}
+
+print_result() {
+  report="$1"
+  answers="$2"
+  python3 - "$report" "$answers" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text())
+answers = json.loads(Path(sys.argv[2]).read_text())
+summary = report.get("summary", {})
+safety = report.get("safety", {})
+
+print()
+print("=== LilHouse easy installer result ===")
+print(f"ok={report.get('ok')}")
+print(f"schema={report.get('schema')}")
+print(f"mode={answers.get('mode')}")
+for key in [
+    "vm_bundle_complete",
+    "deployment_chain_simulated_complete",
+    "ready_for_live_apply",
+    "safe_to_apply_live",
+    "valid_for_live_router_approval",
+]:
+    if key in summary:
+        print(f"{key}={summary.get(key)}")
+for key in [
+    "vm_only",
+    "vm_nic_bypass_valid_for_live",
+    "live_changes",
+    "apply",
+    "plan_only",
+]:
+    if key in safety:
+        print(f"{key}={safety.get(key)}")
+print()
+print("Selected features:")
+for name, enabled in answers.get("features", {}).items():
+    print(f"  {name}={enabled}")
+print()
+print(f"answers={sys.argv[2]}")
+print(f"report={sys.argv[1]}")
 PY
 }
 
@@ -122,6 +176,14 @@ while [ "$#" -gt 0 ]; do
       ;;
     --vm)
       MODE="vm"
+      shift
+      ;;
+    --vm-live)
+      MODE="vm-live"
+      shift
+      ;;
+    --i-am-in-a-throwaway-vm)
+      THROWAWAY_VM=1
       shift
       ;;
     --yes)
@@ -189,22 +251,23 @@ if [ "$MODE" = "wizard" ]; then
   echo " LilHouse Router first-run installer"
   echo "======================================"
   echo
-  echo "This will NOT apply live router changes."
-  echo "It creates a dry-run/simulation report first."
-  echo
 
   detect_interfaces
 
   echo "Install target:"
   echo "  1) VM / first-install simulation"
-  echo "  2) Real router dry-run only"
+  echo "  2) Full throwaway VM install test"
+  echo "  3) Real router dry-run only - not exposed yet"
   echo
   choice="$(ask_default "Choose mode" "1")"
   case "$choice" in
     1) MODE="vm" ;;
     2)
-      echo "Real router dry-run mode will be added next."
-      echo "For now, using VM/simulation mode so this remains safe."
+      MODE="vm-live"
+      THROWAWAY_VM=1
+      ;;
+    3)
+      echo "Real router dry-run mode will be added after VM-live install testing."
       MODE="vm"
       ;;
     *)
@@ -229,22 +292,33 @@ if [ "$MODE" = "wizard" ]; then
   echo "  mobile_alerts=$MOBILE_ALERTS"
   echo "  work_dir=$WORK_DIR"
   echo
-  confirm="$(ask_yes_no "Continue with safe dry-run/simulation?" "yes")"
+
+  if [ "$MODE" = "vm-live" ]; then
+    confirm="$(ask_yes_no "Continue and install into / on this disposable VM?" "no")"
+  else
+    confirm="$(ask_yes_no "Continue with safe dry-run/simulation?" "yes")"
+  fi
+
   if [ "$confirm" != "yes" ]; then
     echo "Cancelled."
     exit 2
   fi
+
   YES=1
 fi
 
-if [ "$MODE" != "vm" ]; then
-  echo "ERROR: easy installer currently only executes VM/simulation mode" >&2
-  echo "Real router dry-run and live install remain intentionally separate and guarded." >&2
+if [ "$MODE" != "vm" ] && [ "$MODE" != "vm-live" ]; then
+  echo "ERROR: easy installer currently supports --vm and --vm-live only" >&2
   exit 2
 fi
 
 if [ "$YES" -ne 1 ]; then
   echo "ERROR: refusing to run easy installer without --yes or interactive confirmation" >&2
+  exit 2
+fi
+
+if [ "$MODE" = "vm-live" ] && [ "$THROWAWAY_VM" -ne 1 ]; then
+  echo "ERROR: --vm-live requires --i-am-in-a-throwaway-vm" >&2
   exit 2
 fi
 
@@ -255,23 +329,27 @@ AI_AGENT="${AI_AGENT:-yes}"
 MOBILE_ALERTS="${MOBILE_ALERTS:-no}"
 
 BUNDLE="$REPO_DIR/bin/lilhouse-router-vm-readiness-bundle"
-if [ ! -x "$BUNDLE" ]; then
-  echo "ERROR: missing executable: $BUNDLE" >&2
-  exit 2
-fi
+LIVE_ORCH="$REPO_DIR/bin/lilhouse-router-live-orchestrator"
+
+test -x "$BUNDLE" || { echo "ERROR: missing executable: $BUNDLE" >&2; exit 2; }
+test -x "$LIVE_ORCH" || { echo "ERROR: missing executable: $LIVE_ORCH" >&2; exit 2; }
 
 mkdir -p "$WORK_DIR"
 
 if [ -z "$OUT" ]; then
-  OUT="$WORK_DIR/easy-install-report.json"
+  if [ "$MODE" = "vm-live" ]; then
+    OUT="$WORK_DIR/vm-live-install-report.json"
+  else
+    OUT="$WORK_DIR/easy-install-report.json"
+  fi
 fi
 
 ANSWERS="$WORK_DIR/easy-install-answers.json"
-write_answers_json "$ANSWERS" >/dev/null
+write_answers_json "$ANSWERS"
 
 echo
 echo "LilHouse easy installer"
-echo "mode=vm-first-install-acceptance"
+echo "mode=$MODE"
 echo "repo=$REPO_DIR"
 echo "work_dir=$WORK_DIR"
 echo "wan=$WAN"
@@ -279,41 +357,50 @@ echo "lan=$LAN"
 echo "cake=$CAKE"
 echo "ai_agent=$AI_AGENT"
 echo "mobile_alerts=$MOBILE_ALERTS"
+
+if [ "$MODE" = "vm" ]; then
+  echo
+  echo "Running VM readiness bundle..."
+
+  "$BUNDLE" \
+    --work-dir "$WORK_DIR/vm-readiness-bundle" \
+    --wan "$WAN" \
+    --lan "$LAN" \
+    --vm-nic-bypass-key "$VM_BYPASS_KEY" \
+    --yes \
+    --out "$OUT" >/tmp/lilhouse-easy-install-last.json
+
+  print_result "$OUT" "$ANSWERS"
+  exit 0
+fi
+
 echo
-echo "Running VM readiness bundle..."
+echo "WARNING: --vm-live installs/activates into / on this disposable VM."
+echo "Step 1/2: generating VM preview/preflight..."
+PREP_WORK="$WORK_DIR/vm-live-prep"
+PREP_REPORT="$WORK_DIR/vm-live-prep-report.json"
 
 "$BUNDLE" \
-  --work-dir "$WORK_DIR/vm-readiness-bundle" \
+  --work-dir "$PREP_WORK" \
   --wan "$WAN" \
   --lan "$LAN" \
   --vm-nic-bypass-key "$VM_BYPASS_KEY" \
   --yes \
-  --out "$OUT" >/tmp/lilhouse-easy-install-last.json
+  --out "$PREP_REPORT" >/tmp/lilhouse-easy-install-vm-live-prep-last.json
 
-python3 - "$OUT" "$ANSWERS" <<'PY'
-import json
-import sys
-from pathlib import Path
+echo
+echo "Step 2/2: executing guarded live chain against / on throwaway VM..."
 
-report = json.loads(Path(sys.argv[1]).read_text())
-answers = json.loads(Path(sys.argv[2]).read_text())
-summary = report.get("summary", {})
-safety = report.get("safety", {})
+"$LIVE_ORCH" \
+  --preflight-report "$PREP_WORK/vm-preflight.json" \
+  --preview-dir "$PREP_WORK/wizard/preview" \
+  --backup-dir "$WORK_DIR/vm-live-backup" \
+  --work-dir "$WORK_DIR/vm-live-work" \
+  --target-root "/" \
+  --execute \
+  --yes \
+  --allow-live-root \
+  --operator-phrase "$LIVE_OPERATOR_PHRASE" \
+  --out "$OUT"
 
-print()
-print("=== LilHouse easy installer result ===")
-print(f"ok={report.get('ok')}")
-print(f"vm_bundle_complete={summary.get('vm_bundle_complete')}")
-print(f"valid_for_live_router_approval={summary.get('valid_for_live_router_approval')}")
-print(f"ready_for_live_apply={summary.get('ready_for_live_apply')}")
-print(f"safe_to_apply_live={summary.get('safe_to_apply_live')}")
-print(f"vm_only={safety.get('vm_only')}")
-print(f"vm_nic_bypass_valid_for_live={safety.get('vm_nic_bypass_valid_for_live')}")
-print()
-print("Selected features:")
-for name, enabled in answers.get("features", {}).items():
-    print(f"  {name}={enabled}")
-print()
-print(f"answers={sys.argv[2]}")
-print(f"report={sys.argv[1]}")
-PY
+print_result "$OUT" "$ANSWERS"

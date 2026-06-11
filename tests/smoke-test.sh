@@ -2046,4 +2046,21 @@ assert answers["features"]["ai_agent"] is True
 assert answers["features"]["mobile_alerts"] is False
 PYJSON
 
+
+echo
+echo "== run easy installer throwaway VM live refusal checks =="
+
+set +e
+"$REPO_DIR/easy-install.sh" \
+  --vm-live \
+  --yes \
+  --wan eth0 \
+  --lan eth1 \
+  --work-dir "$TMP_STATE/easy-install-vm-live-refuse" \
+  --out "$TMP_STATE/easy-install-vm-live-refuse.json" >"$TMP_STATE/easy-install-vm-live-refuse.out" 2>&1
+VM_LIVE_NO_THROWAWAY_RC=$?
+set -e
+test "$VM_LIVE_NO_THROWAWAY_RC" -eq 2
+grep -q -- "--i-am-in-a-throwaway-vm" "$TMP_STATE/easy-install-vm-live-refuse.out"
+
 echo "Smoke test passed."
