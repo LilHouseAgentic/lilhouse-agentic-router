@@ -2014,10 +2014,13 @@ test "$EASY_NO_YES_RC" -eq 2
   --yes \
   --wan eth0 \
   --lan eth1 \
+  --cake yes \
+  --ai yes \
+  --mobile-alerts no \
   --work-dir "$EASY_WORK" \
   --out "$EASY_JSON" >"$TMP_STATE/easy-install.out"
 
-python3 - "$EASY_JSON" <<'PYJSON'
+python3 - "$EASY_JSON" "$EASY_WORK/easy-install-answers.json" <<'PYJSON'
 import json
 import sys
 from pathlib import Path
@@ -2037,6 +2040,10 @@ assert report["summary"]["valid_for_live_router_approval"] is False
 assert report["summary"]["ready_for_live_apply"] is False
 assert report["summary"]["safe_to_apply_live"] is False
 assert report["summary"]["next_gate"] == "real-live-readiness-bundle-on-pi"
+answers = json.loads(Path(sys.argv[2]).read_text())
+assert answers["features"]["cake"] is True
+assert answers["features"]["ai_agent"] is True
+assert answers["features"]["mobile_alerts"] is False
 PYJSON
 
 echo "Smoke test passed."
