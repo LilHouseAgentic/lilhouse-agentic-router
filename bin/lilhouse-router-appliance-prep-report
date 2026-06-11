@@ -18,6 +18,8 @@ def cmd_text(args):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--report", required=True)
+    ap.add_argument("--wan", default=None)
+    ap.add_argument("--lan", default=None)
     args = ap.parse_args()
 
     path = Path(args.report)
@@ -41,12 +43,13 @@ def main():
     cake_env = Path("/etc/lilhouse/cake.env")
     cake_env_exists = cake_env.exists()
 
-    wan = "eth0"
+    wan = args.wan or "eth0"
+    lan = args.lan or "eth1"
     ifb = "ifb0"
 
     if cake_env_exists:
         for line in cake_env.read_text(errors="replace").splitlines():
-            if line.startswith("LILHOUSE_CAKE_WAN="):
+            if line.startswith("LILHOUSE_CAKE_WAN=") and not args.wan:
                 wan = line.split("=", 1)[1].strip()
             elif line.startswith("LILHOUSE_CAKE_IFB="):
                 ifb = line.split("=", 1)[1].strip()
@@ -54,6 +57,7 @@ def main():
     wan_qdisc = cmd_text(["tc", "qdisc", "show", "dev", wan])
     ifb_qdisc = cmd_text(["tc", "qdisc", "show", "dev", ifb])
     ifb_link = cmd_text(["ip", "-br", "link", "show", ifb])
+    nft_ruleset = cmd_text(["nft", "list", "ruleset"])
 
     cake_active = (
         services.get("lilhouse-cake.service", False)
@@ -64,6 +68,42 @@ def main():
 
     dns_active = services.get("unbound", False) and services.get("pihole-FTL", False)
     firewall_active = services.get("nftables", False)
+    firewall_has_filter_table = "table inet lilhouse_filter" in nft_ruleset
+    firewall_has_nat_table = "table ip lilhouse_nat" in nft_ruleset
+    wan_input_policy_drop = (
+        "chain input" in nft_ruleset
+        and "policy drop" in nft_ruleset
+    )
+    lan_interface_accept = (
+        f'iifname "{lan}" accept' in nft_ruleset
+        and f'iifname "{wan}" accept' not in nft_ruleset
+        and f'iifname "{ifb}" accept' not in nft_ruleset
+    )
+    lan_to_wan_forward = f'iifname "{lan}" oifname "{wan}" accept' in nft_ruleset
+    nat_masquerade = "masquerade" in nft_ruleset
+    wan_dhcp_client_allowed = f'iifname "{wan}" udp sport 67 udp dport 68 accept' in nft_ruleset
+    wan_admin_ports_not_explicitly_allowed = not any(
+        rule_fragment in nft_ruleset
+        for rule_fragment in [
+            f'iifname "{wan}" tcp dport 22 accept',
+            f'iifname "{wan}" tcp dport 53 accept',
+            f'iifname "{wan}" udp dport 53 accept',
+            f'iifname "{wan}" tcp dport 80 accept',
+            f'iifname "{wan}" tcp dport 443 accept',
+            f'iifname "{wan}" tcp dport 3389 accept',
+        ]
+    )
+    firewall_hardened = (
+        firewall_active
+        and firewall_has_filter_table
+        and firewall_has_nat_table
+        and wan_input_policy_drop
+        and lan_interface_accept
+        and lan_to_wan_forward
+        and nat_masquerade
+        and wan_dhcp_client_allowed
+        and wan_admin_ports_not_explicitly_allowed
+    )
     telemetry_active = (
         services.get("lilhouse-current-state.timer", False)
         and services.get("lilhouse-storage-health.timer", False)
@@ -72,7 +112,7 @@ def main():
     appliance_prep_ok = (
         cake_active
         and dns_active
-        and firewall_active
+        and firewall_hardened
         and telemetry_active
         and required_services_active
     )
@@ -101,6 +141,17 @@ def main():
         },
         "firewall": {
             "nftables_active": firewall_active,
+            "wan": wan,
+            "lan": lan,
+            "hardened": firewall_hardened,
+            "has_filter_table": firewall_has_filter_table,
+            "has_nat_table": firewall_has_nat_table,
+            "wan_input_policy_drop": wan_input_policy_drop,
+            "lan_interface_accept": lan_interface_accept,
+            "lan_to_wan_forward": lan_to_wan_forward,
+            "nat_masquerade": nat_masquerade,
+            "wan_dhcp_client_allowed": wan_dhcp_client_allowed,
+            "wan_admin_ports_not_explicitly_allowed": wan_admin_ports_not_explicitly_allowed,
         },
         "telemetry": {
             "current_state_timer_active": services.get("lilhouse-current-state.timer", False),
@@ -125,6 +176,7 @@ def main():
     summary["appliance_cake_active"] = cake_active
     summary["appliance_dns_active"] = dns_active
     summary["appliance_firewall_active"] = firewall_active
+    summary["appliance_firewall_hardened"] = firewall_hardened
     summary["appliance_telemetry_active"] = telemetry_active
 
     safety = report.setdefault("safety", {})

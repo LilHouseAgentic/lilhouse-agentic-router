@@ -463,5 +463,5 @@ echo "Step 3/3: executing guarded live chain against / on throwaway VM..."
   --operator-phrase "$LIVE_OPERATOR_PHRASE" \
   --out "$OUT"
 
-"$APPLIANCE_PREP_REPORTER" --report "$OUT"
+"$APPLIANCE_PREP_REPORTER" --report "$OUT" --wan "$WAN" --lan "$LAN"
 print_result "$OUT" "$ANSWERS"
