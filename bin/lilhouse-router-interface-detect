@@ -104,6 +104,8 @@ def classify():
         has_default = name in defaults
         has_ipv4 = has_globalish_ipv4(addrs)
         usb_style = name.startswith("enx")
+        wireless = name.startswith(("wl", "ww")) or (iface_path / "wireless").exists()
+        ethernet_style = name.startswith(("en", "eth"))
         likely_physical = (
             name.startswith(("en", "eth", "wl", "ww"))
             and not EXCLUDE_RE.match(name)
@@ -119,7 +121,7 @@ def classify():
             wan_score += 10
         if has_ipv4:
             wan_score += 10
-        if name.startswith(("wl", "ww")):
+        if wireless:
             wan_score += 3
 
         lan_score = 0
@@ -127,14 +129,20 @@ def classify():
             lan_score += 45
         if likely_physical:
             lan_score += 20
+        if ethernet_style:
+            lan_score += 30
         if usb_style:
             lan_score += 20
-        if carrier in ("0", "1"):
+        if carrier == "1":
             lan_score += 10
+        elif carrier in ("0", "unknown"):
+            lan_score += 3
         if not has_ipv4:
             lan_score += 10
         if operstate in ("down", "unknown", "up"):
             lan_score += 5
+        if wireless:
+            lan_score -= 80
 
         interfaces.append(
             {
@@ -146,6 +154,8 @@ def classify():
                 "has_globalish_ipv4": has_ipv4,
                 "likely_physical": likely_physical,
                 "usb_style_name": usb_style,
+                "ethernet_style_name": ethernet_style,
+                "wireless": wireless,
                 "wan_score": wan_score,
                 "lan_score": lan_score,
             }

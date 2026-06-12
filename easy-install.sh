@@ -320,8 +320,39 @@ if [ "$MODE" = "wizard" ]; then
       ;;
   esac
 
-  WAN="$(ask_default "WAN interface" "${WAN:-eth0}")"
-  LAN="$(ask_default "LAN interface" "${LAN:-eth1}")"
+WAN_DEFAULT="eth0"
+LAN_DEFAULT="eth1"
+IFACE_DETECT="$REPO_DIR/bin/lilhouse-router-interface-detect"
+
+if [ -x "$IFACE_DETECT" ]; then
+  DETECT_OUT="$("$IFACE_DETECT" --shell 2>/dev/null || true)"
+
+  while IFS='=' read -r key value; do
+    value="${value#\'}"
+    value="${value%\'}"
+    case "$key" in
+      LILHOUSE_WAN_GUESS) LILHOUSE_WAN_GUESS="$value" ;;
+      LILHOUSE_LAN_GUESS) LILHOUSE_LAN_GUESS="$value" ;;
+      LILHOUSE_IFACE_DETECT_OK) LILHOUSE_IFACE_DETECT_OK="$value" ;;
+    esac
+  done <<EOF_DETECT
+$DETECT_OUT
+EOF_DETECT
+
+  if [ "${LILHOUSE_IFACE_DETECT_OK:-no}" = "yes" ]; then
+    WAN_DEFAULT="${LILHOUSE_WAN_GUESS:-$WAN_DEFAULT}"
+    LAN_DEFAULT="${LILHOUSE_LAN_GUESS:-$LAN_DEFAULT}"
+
+    echo
+    echo "Auto-detected likely router layout:"
+    echo "  WAN guess: $WAN_DEFAULT"
+    echo "  LAN guess: $LAN_DEFAULT"
+    echo "You can override these if they are wrong."
+  fi
+fi
+
+WAN="$(ask_default "WAN interface" "${WAN:-$WAN_DEFAULT}")"
+LAN="$(ask_default "LAN interface" "${LAN:-$LAN_DEFAULT}")"
   CAKE="yes"
   AI_AGENT="yes"
   MOBILE_ALERTS="$(ask_yes_no "Configure mobile push alerts now? You can choose no and set them up after install." "${MOBILE_ALERTS:-no}")"
