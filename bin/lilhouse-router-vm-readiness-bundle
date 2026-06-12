@@ -125,6 +125,8 @@ def main():
             "guarded_deploy_dry_run",
             [
                 str(repo / "bin/lilhouse-router-guarded-deploy-dry-run"),
+                "--wan", args.wan,
+                "--lan", args.lan,
                 "--preflight-report", str(preflight_json),
                 "--preview-dir", str(wizard_out / "preview"),
                 "--target-root", str(orchestrator_root),
@@ -141,6 +143,8 @@ def main():
             "live_orchestrator_plan_only",
             [
                 str(repo / "bin/lilhouse-router-live-orchestrator"),
+                "--wan", args.wan,
+                "--lan", args.lan,
                 "--preflight-report", str(preflight_json),
                 "--preview-dir", str(wizard_out / "preview"),
                 "--backup-dir", str(work_dir / "live-backup"),
