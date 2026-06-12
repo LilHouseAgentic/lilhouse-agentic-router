@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+import argparse
+import ipaddress
+import json
+import os
+import re
+import shlex
+import subprocess
+from pathlib import Path
+
+
+EXCLUDE_RE = re.compile(
+    r"^(lo|ifb\d+|docker\d*|br-[0-9a-f]+|veth.*|virbr\d*|tun\d*|tap\d*|wg\d*|tailscale\d*|zt.*)$"
+)
+
+
+def run(cmd):
+    try:
+        return subprocess.run(
+            cmd,
+            text=True,
+            capture_output=True,
+            timeout=3,
+            check=False,
+        )
+    except Exception:
+        return None
+
+
+def cmd_text(cmd):
+    r = run(cmd)
+    if r is None:
+        return ""
+    return (r.stdout or "").strip()
+
+
+def read_sys(path, default=""):
+    try:
+        p = Path(path)
+        return p.read_text().strip() if p.exists() else default
+    except OSError:
+        return default
+
+
+def default_ifaces():
+    defaults = set()
+
+    for cmd in (
+        ["ip", "-4", "route", "show", "default"],
+        ["ip", "-6", "route", "show", "default"],
+    ):
+        text = cmd_text(cmd)
+        for line in text.splitlines():
+            parts = line.split()
+            if "dev" in parts:
+                try:
+                    defaults.add(parts[parts.index("dev") + 1])
+                except Exception:
+                    pass
+
+    return defaults
+
+
+def ipv4_for_iface(name):
+    text = cmd_text(["ip", "-4", "-o", "addr", "show", "dev", name])
+    addrs = []
+    for line in text.splitlines():
+        parts = line.split()
+        if "inet" in parts:
+            cidr = parts[parts.index("inet") + 1]
+            addrs.append(cidr)
+    return addrs
+
+
+def has_globalish_ipv4(addrs):
+    for cidr in addrs:
+        try:
+            ip = ipaddress.ip_interface(cidr).ip
+        except Exception:
+            continue
+        if ip.is_loopback or ip.is_link_local:
+            continue
+        return True
+    return False
+
+
+def classify():
+    sys_net = Path("/sys/class/net")
+    defaults = default_ifaces()
+    interfaces = []
+
+    for iface_path in sorted(sys_net.iterdir()):
+        name = iface_path.name
+
+        if EXCLUDE_RE.match(name):
+            continue
+
+        operstate = read_sys(iface_path / "operstate", "unknown")
+        carrier = read_sys(iface_path / "carrier", "unknown")
+        ifindex = read_sys(iface_path / "ifindex", "")
+        iflink = read_sys(iface_path / "iflink", "")
+        addrs = ipv4_for_iface(name)
+
+        has_default = name in defaults
+        has_ipv4 = has_globalish_ipv4(addrs)
+        usb_style = name.startswith("enx")
+        likely_physical = (
+            name.startswith(("en", "eth", "wl", "ww"))
+            and not EXCLUDE_RE.match(name)
+            and ifindex == iflink
+        )
+
+        wan_score = 0
+        if has_default:
+            wan_score += 100
+        if operstate == "up":
+            wan_score += 15
+        if carrier == "1":
+            wan_score += 10
+        if has_ipv4:
+            wan_score += 10
+        if name.startswith(("wl", "ww")):
+            wan_score += 3
+
+        lan_score = 0
+        if not has_default:
+            lan_score += 45
+        if likely_physical:
+            lan_score += 20
+        if usb_style:
+            lan_score += 20
+        if carrier in ("0", "1"):
+            lan_score += 10
+        if not has_ipv4:
+            lan_score += 10
+        if operstate in ("down", "unknown", "up"):
+            lan_score += 5
+
+        interfaces.append(
+            {
+                "name": name,
+                "operstate": operstate,
+                "carrier": carrier,
+                "ipv4": addrs,
+                "has_default_route": has_default,
+                "has_globalish_ipv4": has_ipv4,
+                "likely_physical": likely_physical,
+                "usb_style_name": usb_style,
+                "wan_score": wan_score,
+                "lan_score": lan_score,
+            }
+        )
+
+    wan_guess = None
+    lan_guess = None
+
+    if interfaces:
+        wan_sorted = sorted(interfaces, key=lambda x: (x["wan_score"], x["name"]), reverse=True)
+        if wan_sorted and wan_sorted[0]["wan_score"] > 0:
+            wan_guess = wan_sorted[0]["name"]
+
+        lan_candidates = [i for i in interfaces if i["name"] != wan_guess]
+        lan_sorted = sorted(lan_candidates, key=lambda x: (x["lan_score"], x["name"]), reverse=True)
+        if lan_sorted and lan_sorted[0]["lan_score"] > 0:
+            lan_guess = lan_sorted[0]["name"]
+
+    return {
+        "schema": "lilhouse.interface_detect.v1",
+        "ok": bool(wan_guess and lan_guess and wan_guess != lan_guess),
+        "wan_guess": wan_guess,
+        "lan_guess": lan_guess,
+        "interfaces": interfaces,
+        "notes": [
+            "WAN is ranked toward interfaces with a default route and usable IPv4.",
+            "LAN is ranked toward non-default physical/USB Ethernet interfaces.",
+            "Installer should still ask for confirmation before live install.",
+        ],
+    }
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--shell", action="store_true", help="print shell exports")
+    args = ap.parse_args()
+
+    report = classify()
+
+    if args.shell:
+        print(f"LILHOUSE_WAN_GUESS={shlex.quote(report.get('wan_guess') or '')}")
+        print(f"LILHOUSE_LAN_GUESS={shlex.quote(report.get('lan_guess') or '')}")
+        print(f"LILHOUSE_IFACE_DETECT_OK={shlex.quote('yes' if report.get('ok') else 'no')}")
+        return 0 if report.get("ok") else 1
+
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report.get("ok") else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
