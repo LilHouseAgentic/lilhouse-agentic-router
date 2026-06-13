@@ -49,7 +49,7 @@ echo "# fake current-state service" > "$TMP_SOURCE/etc/systemd/system/lilhouse-c
   --unit-target-root "$TMP_UNITS" \
   --wan eth0 \
   --lan eth1 \
-  --lan-ip 10.23.0.1 \
+  --lan-ip 192.168.2.1 \
   --dns-test-name example.com \
   --wan-test-ip 1.1.1.1 \
   --timeout-seconds 120 \

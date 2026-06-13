@@ -11,7 +11,7 @@ def main() -> int:
         description="Plan post-apply health checks required before cancelling rollback."
     )
     parser.add_argument("apply_plan", help="router apply-plan JSON.")
-    parser.add_argument("--lan-ip", default="10.23.0.1")
+    parser.add_argument("--lan-ip", default="192.168.2.1")
     parser.add_argument("--dns-test-name", default="example.com")
     parser.add_argument("--wan-test-ip", default="1.1.1.1")
     parser.add_argument("--timeout-seconds", type=int, default=120)

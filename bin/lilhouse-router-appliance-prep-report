@@ -69,7 +69,7 @@ def main():
     )
 
     dns_active = services.get("unbound", False) and services.get("pihole-FTL", False)
-    expected_web_port = f"{lan_ip}:80o,{lan_ip}:443os" if (lan_ip := "10.23.0.1") else ""
+    expected_web_port = f"{lan_ip}:80o,{lan_ip}:443os" if (lan_ip := "192.168.2.1") else ""
     # Prefer the LAN IP from the appliance config when present.
     lan_ip_file = Path("/etc/lilhouse/router.env")
     if lan_ip_file.exists():

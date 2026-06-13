@@ -96,7 +96,7 @@ rm -f /etc/dnsmasq.d/02-lilhouse-dhcp.conf
 rm -f /etc/unbound/unbound.conf.d/lilhouse.conf
 
 # VM test reset: remove the default LilHouse LAN address if present.
-for dev in $(ip -o -4 addr show | awk '$4 == "10.23.0.1/24" {print $2}' | sort -u); do
+for dev in $(ip -o -4 addr show | awk '$4 == "192.168.2.1/24" {print $2}' | sort -u); do
   ip addr flush dev "$dev" 2>/dev/null || true
 done
 

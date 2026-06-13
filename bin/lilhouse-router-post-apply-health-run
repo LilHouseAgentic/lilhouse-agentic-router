@@ -137,7 +137,7 @@ def main():
     ap.add_argument("--service-activation-report", required=True)
     ap.add_argument("--wan", default="eth0")
     ap.add_argument("--lan", default="eth1")
-    ap.add_argument("--lan-ip", default="10.23.0.1")
+    ap.add_argument("--lan-ip", default="192.168.2.1")
     ap.add_argument("--dns-test-name", default="example.com")
     ap.add_argument("--wan-test-ip", default="1.1.1.1")
     ap.add_argument("--timeout-seconds", type=int, default=3)

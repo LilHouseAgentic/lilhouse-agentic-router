@@ -110,9 +110,9 @@ Expected firewall properties:
 
 Expected:
 
-    10.23.0.1:80o,10.23.0.1:443os
+    192.168.2.1:80o,192.168.2.1:443os
 
-Pi-hole web should listen on 10.23.0.1:80 and 10.23.0.1:443, not wildcard 0.0.0.0:80 or 0.0.0.0:443.
+Pi-hole web should listen on 192.168.2.1:80 and 192.168.2.1:443, not wildcard 0.0.0.0:80 or 0.0.0.0:443.
 
 ## Verify networkd LAN config
 
@@ -123,7 +123,7 @@ Pi-hole web should listen on 10.23.0.1:80 and 10.23.0.1:443, not wildcard 0.0.0.
 Expected:
 
     [Network]
-    Address=10.23.0.1/24
+    Address=192.168.2.1/24
     IPv4Forwarding=yes
     IPv6Forwarding=yes
     IPv6AcceptRA=no

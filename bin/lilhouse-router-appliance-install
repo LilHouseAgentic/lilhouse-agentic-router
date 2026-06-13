@@ -5,10 +5,10 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 WAN=""
 LAN=""
-LAN_CIDR="10.23.0.1/24"
-LAN_IP="10.23.0.1"
-DHCP_START="10.23.0.100"
-DHCP_END="10.23.0.200"
+LAN_CIDR="192.168.2.1/24"
+LAN_IP="192.168.2.1"
+DHCP_START="192.168.2.100"
+DHCP_END="192.168.2.200"
 CAKE_DOWN="100mbit"
 CAKE_UP="20mbit"
 LILHOUSE_PIHOLE_ADLISTS="${LILHOUSE_PIHOLE_ADLISTS:-$REPO_DIR/config/pihole-adlists.txt}"
@@ -24,9 +24,9 @@ Usage:
 Options:
   --wan IFACE          Internet/WAN interface
   --lan IFACE          Home/LAN interface
-  --lan-cidr CIDR      LAN gateway CIDR, default 10.23.0.1/24
-  --dhcp-start IP      DHCP start, default 10.23.0.100
-  --dhcp-end IP        DHCP end, default 10.23.0.200
+  --lan-cidr CIDR      LAN gateway CIDR, default 192.168.2.1/24
+  --dhcp-start IP      DHCP start, default 192.168.2.100
+  --dhcp-end IP        DHCP end, default 192.168.2.200
   --cake-down RATE     CAKE download/ingress rate, default 100mbit
   --cake-up RATE       CAKE upload/egress rate, default 20mbit
   --prepare-only       Install/configure prerequisites and services, do not run final deploy chain

@@ -99,10 +99,10 @@ LILHOUSE_STORAGE_PATHS="/,$REPO_DIR" \
 "$REPO_DIR/bin/lilhouse-router-plan" \
   --wan wan0 \
   --lan lan0 \
-  --lan-ip 10.23.0.1 \
-  --subnet 10.23.0.0/24 \
-  --dhcp-start 10.23.0.100 \
-  --dhcp-end 10.23.0.200 \
+  --lan-ip 192.168.2.1 \
+  --subnet 192.168.2.0/24 \
+  --dhcp-start 192.168.2.100 \
+  --dhcp-end 192.168.2.200 \
   --output "$TMP_STATE/router-plan.json" >/dev/null
 
 "$REPO_DIR/bin/lilhouse-router-plan-summary" "$TMP_STATE/router-plan.json" >"$TMP_STATE/router-plan-summary.txt"
@@ -111,10 +111,10 @@ LILHOUSE_STORAGE_PATHS="/,$REPO_DIR" \
   --out-dir "$TMP_STATE/router-wizard" \
   --wan wan0 \
   --lan lan0 \
-  --lan-ip 10.23.0.1 \
-  --subnet 10.23.0.0/24 \
-  --dhcp-start 10.23.0.100 \
-  --dhcp-end 10.23.0.200 >/dev/null
+  --lan-ip 192.168.2.1 \
+  --subnet 192.168.2.0/24 \
+  --dhcp-start 192.168.2.100 \
+  --dhcp-end 192.168.2.200 >/dev/null
 
 LILHOUSE_STATE_DIR="$TMP_STATE" \
 LILHOUSE_RUNTIME_DIR="$TMP_RUN" \
@@ -164,7 +164,7 @@ test -f "$WIZARD_OUT/preview/etc/systemd/system/lilhouse-storage-health.timer"
 grep -q "LilHouse router deploy generated networkd config" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
 grep -q "\[Match\]" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
 grep -q "\[Network\]" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
-grep -q "Address=10.23.0.1/24" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
+grep -q "Address=192.168.2.1/24" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
 grep -q "IPv4Forwarding=yes" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
 grep -q "IPv6Forwarding=yes" "$WIZARD_OUT/preview/etc/systemd/network/20-lilhouse-lan.network"
 
@@ -182,9 +182,9 @@ grep -q "LILHOUSE_PIHOLE_UPSTREAM=127.0.0.1#5335" "$WIZARD_OUT/preview/etc/lilho
 grep -q "LILHOUSE_PIHOLE_INTERFACE=eth1" "$WIZARD_OUT/preview/etc/lilhouse/pihole-dns-plan.env"
 grep -q "LILHOUSE_DHCP_PROVIDER=pihole-FTL" "$WIZARD_OUT/preview/etc/lilhouse/pihole-dhcp-plan.env"
 grep -q "LILHOUSE_DHCP_INTERFACE=eth1" "$WIZARD_OUT/preview/etc/lilhouse/pihole-dhcp-plan.env"
-grep -q "LILHOUSE_DHCP_ROUTER=10.23.0.1" "$WIZARD_OUT/preview/etc/lilhouse/pihole-dhcp-plan.env"
-grep -q "LILHOUSE_DHCP_START=10.23.0.100" "$WIZARD_OUT/preview/etc/lilhouse/pihole-dhcp-plan.env"
-grep -q "LILHOUSE_DHCP_END=10.23.0.200" "$WIZARD_OUT/preview/etc/lilhouse/pihole-dhcp-plan.env"
+grep -q "LILHOUSE_DHCP_ROUTER=192.168.2.1" "$WIZARD_OUT/preview/etc/lilhouse/pihole-dhcp-plan.env"
+grep -q "LILHOUSE_DHCP_START=192.168.2.100" "$WIZARD_OUT/preview/etc/lilhouse/pihole-dhcp-plan.env"
+grep -q "LILHOUSE_DHCP_END=192.168.2.200" "$WIZARD_OUT/preview/etc/lilhouse/pihole-dhcp-plan.env"
 grep -q "interface: 127.0.0.1" "$WIZARD_OUT/preview/etc/unbound/unbound.conf.d/lilhouse.conf"
 grep -q "port: 5335" "$WIZARD_OUT/preview/etc/unbound/unbound.conf.d/lilhouse.conf"
 grep -q "edns-buffer-size: 1232" "$WIZARD_OUT/preview/etc/unbound/unbound.conf.d/lilhouse.conf"
@@ -199,7 +199,7 @@ grep -q "LilHouse router deploy preview manifest" "$WIZARD_OUT/preview/MANIFEST.
 grep -q "No files here have been written to the live system" "$WIZARD_OUT/preview/MANIFEST.txt"
 grep -q "WAN interface: eth0" "$WIZARD_OUT/preview/MANIFEST.txt"
 grep -q "LAN interface: eth1" "$WIZARD_OUT/preview/MANIFEST.txt"
-grep -q "LAN address: 10.23.0.1/24" "$WIZARD_OUT/preview/MANIFEST.txt"
+grep -q "LAN address: 192.168.2.1/24" "$WIZARD_OUT/preview/MANIFEST.txt"
 grep -q "etc/nftables.conf" "$WIZARD_OUT/preview/MANIFEST.txt"
 grep -q "etc/unbound/unbound.conf.d/lilhouse.conf" "$WIZARD_OUT/preview/MANIFEST.txt"
 grep -q "ROLLBACK-NOTES.txt" "$WIZARD_OUT/preview/MANIFEST.txt"
@@ -638,7 +638,7 @@ PYJSON
 
 "$REPO_DIR/bin/lilhouse-router-post-apply-health-plan" \
   "$DRESS_OUT/apply-plan.json" \
-  --lan-ip 10.23.0.1 \
+  --lan-ip 192.168.2.1 \
   --dns-test-name example.com \
   --wan-test-ip 1.1.1.1 \
   --timeout-seconds 120 >"$TMP_STATE/router-post-apply-health-plan.json"
@@ -721,7 +721,7 @@ HEALTH_REHEARSAL_OUT="$TMP_STATE/router-post-apply-health-rehearsal"
 "$REPO_DIR/bin/lilhouse-router-post-apply-health-rehearsal" \
   --out-dir "$HEALTH_REHEARSAL_OUT" \
   --apply-plan "$DRESS_OUT/apply-plan.json" \
-  --lan-ip 10.23.0.1 \
+  --lan-ip 192.168.2.1 \
   --dns-test-name example.com \
   --wan-test-ip 1.1.1.1 \
   --timeout-seconds 120 >"$TMP_STATE/router-post-apply-health-rehearsal.json"
@@ -912,7 +912,7 @@ python3 -m json.tool "$TMP_STATE/router-restore-guard-fake-root.json" >/dev/null
 
 "$REPO_DIR/bin/lilhouse-router-health-probe-plan" \
   "$HEALTH_REHEARSAL_OUT/post-apply-health-rehearsal-report.json" \
-  --lan-ip 10.23.0.1 \
+  --lan-ip 192.168.2.1 \
   --dns-test-name example.com \
   --wan-test-ip 1.1.1.1 \
   --timeout-seconds 120 >"$TMP_STATE/router-health-probe-plan.json"
@@ -999,7 +999,7 @@ HEALTH_PROBE_REHEARSAL_OUT="$TMP_STATE/router-health-probe-rehearsal"
 "$REPO_DIR/bin/lilhouse-router-health-probe-rehearsal" \
   --out-dir "$HEALTH_PROBE_REHEARSAL_OUT" \
   --health-rehearsal-report "$HEALTH_REHEARSAL_OUT/post-apply-health-rehearsal-report.json" \
-  --lan-ip 10.23.0.1 \
+  --lan-ip 192.168.2.1 \
   --dns-test-name example.com \
   --wan-test-ip 1.1.1.1 \
   --timeout-seconds 120 >"$TMP_STATE/router-health-probe-rehearsal.json"
@@ -1150,7 +1150,7 @@ echo "# fake current-state service" > "$RC_SOURCE/etc/systemd/system/lilhouse-cu
   --unit-target-root "$RC_UNITS" \
   --wan eth0 \
   --lan eth1 \
-  --lan-ip 10.23.0.1 \
+  --lan-ip 192.168.2.1 \
   --dns-test-name example.com \
   --wan-test-ip 1.1.1.1 \
   --timeout-seconds 120 \
@@ -1630,7 +1630,7 @@ test "$POST_APPLY_HEALTH_REFUSAL_RC" -eq 2
   --service-activation-report "$SERVICE_ACTIVATION_JSON" \
   --wan eth0 \
   --lan eth1 \
-  --lan-ip 10.23.0.1 \
+  --lan-ip 192.168.2.1 \
   --dns-test-name example.com \
   --wan-test-ip 1.1.1.1 \
   --timeout-seconds 1 \

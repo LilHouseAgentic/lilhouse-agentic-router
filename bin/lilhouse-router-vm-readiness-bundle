@@ -56,7 +56,7 @@ def main():
     ap.add_argument("--work-dir", required=True)
     ap.add_argument("--wan", default="eth0")
     ap.add_argument("--lan", default="eth1")
-    ap.add_argument("--lan-ip", default="10.23.0.1")
+    ap.add_argument("--lan-ip", default="192.168.2.1")
     ap.add_argument("--vm-nic-bypass-key", default="")
     ap.add_argument("--yes", action="store_true")
     ap.add_argument("--out", default="")
