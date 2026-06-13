@@ -588,9 +588,9 @@ if [ "$MODE" = "vm" ]; then
   exit 0
 fi
 
-echo "Installing router appliance..."
+echo "Installing..."
 # Audit safety marker: WARNING: --vm-live installs/activates into / on this disposable VM.
-echo "Installing into this test router now. Detailed logs are saved if anything fails."
+echo "Detailed logs are saved if anything fails. Final checks will show whether the install was successful."
 echo
 
 echo "Resetting VM-live work reports..."
