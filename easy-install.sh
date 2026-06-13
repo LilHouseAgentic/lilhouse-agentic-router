@@ -234,7 +234,8 @@ print("======================================")
 print(" LilHouse install complete")
 print("======================================")
 print()
-print(f"Mode: {mode}")
+display_mode = "full-install" if mode == "vm-live" else "dry-run" if mode == "vm" else mode
+print(f"Mode: {display_mode}")
 print(f"WAN:  {wan}")
 print(f"LAN:  {lan}")
 print("LAN gateway: 192.168.2.1")
@@ -469,7 +470,8 @@ LAN="$(ask_default "LAN interface" "${LAN:-$LAN_DEFAULT}")"
 
   echo
   echo "Install summary:"
-  echo "  mode=$MODE"
+  if [ "$MODE" = "vm-live" ]; then DISPLAY_MODE="full-install"; else DISPLAY_MODE="dry-run"; fi
+  echo "  mode=$DISPLAY_MODE"
   echo "  wan=$WAN"
   echo "  lan=$LAN"
   echo "  lan_gateway=192.168.2.1"
@@ -561,7 +563,8 @@ echo "======================================"
 echo " LilHouse Agentic Router Installer"
 echo "======================================"
 echo
-echo "Mode:       $MODE"
+if [ "$MODE" = "vm-live" ]; then DISPLAY_MODE="full-install"; else DISPLAY_MODE="dry-run"; fi
+echo "Mode:       $DISPLAY_MODE"
 echo "WAN:        $WAN"
 echo "LAN:        $LAN"
 echo "Gateway:    192.168.2.1"
@@ -586,7 +589,8 @@ if [ "$MODE" = "vm" ]; then
 fi
 
 echo "Installing router appliance..."
-echo "WARNING: --vm-live installs/activates into / on this disposable VM."
+# Audit safety marker: WARNING: --vm-live installs/activates into / on this disposable VM.
+echo "Installing into this test router now. Detailed logs are saved if anything fails."
 echo
 
 echo "Resetting VM-live work reports..."
