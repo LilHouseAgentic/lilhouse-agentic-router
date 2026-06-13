@@ -318,6 +318,8 @@ PY_CLEAN_RESULT
     echo
     echo "Next step: plug a device into the LAN side."
     echo "It should receive 192.168.2.x with gateway/DNS 192.168.2.1."
+    echo
+    echo "Later, check router health with: sudo lilhouse-router-status"
   fi
 
   echo
