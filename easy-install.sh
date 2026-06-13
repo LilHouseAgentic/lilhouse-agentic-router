@@ -89,6 +89,10 @@ detect_interfaces() {
   echo
 }
 
+iface_exists() {
+  ip link show "$1" >/dev/null 2>&1
+}
+
 install_base_prereqs() {
   echo
   echo "Installing base prerequisites..."
@@ -212,6 +216,117 @@ print(f"report={sys.argv[1]}")
 PY
 }
 
+print_result() {
+  report="$1"
+  answers="$2"
+
+  python3 - "$report" "$answers" <<'PY_CLEAN_RESULT'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text())
+answers = json.loads(Path(sys.argv[2]).read_text())
+summary = report.get("summary", {})
+features = answers.get("features", {})
+mode = answers.get("mode")
+wan = answers.get("wan")
+lan = answers.get("lan")
+
+print()
+print("======================================")
+print(" LilHouse install complete")
+print("======================================")
+print()
+display_mode = "full-install" if mode == "vm-live" else "dry-run" if mode == "vm" else mode
+print(f"Mode: {display_mode}")
+print(f"WAN:  {wan}")
+print(f"LAN:  {lan}")
+print("LAN gateway: 192.168.2.1")
+print("DHCP range:  192.168.2.100-192.168.2.200")
+print("DNS:         192.168.2.1")
+print()
+print("Features:")
+print(f"  CAKE/SQM:        {'yes' if features.get('cake') else 'no'}")
+print(f"  Core agent:      {'yes' if features.get('ai_agent') else 'no'}")
+print(f"  Mobile alerts:   {'yes' if features.get('mobile_alerts') else 'no'}")
+print()
+if summary:
+    print("Deployment:")
+    for label, key in [
+        ("appliance prep", "appliance_prep_ok"),
+        ("DNS active", "appliance_dns_active"),
+        ("CAKE active", "appliance_cake_active"),
+        ("firewall active", "appliance_firewall_active"),
+        ("telemetry active", "appliance_telemetry_active"),
+        ("guarded chain", "live_orchestrator_complete"),
+        ("safe to leave live", "safe_to_leave_live_state"),
+    ]:
+        if key in summary:
+            print(f"  {'✓' if summary.get(key) else '✗'} {label}")
+PY_CLEAN_RESULT
+
+  if [ "${MODE:-}" = "vm-live" ]; then
+    echo
+    echo "Final checks:"
+
+    if "$REPO_DIR/bin/lilhouse-router-alpha-readiness" --report "$report" >/tmp/lilhouse-alpha-readiness-last.json 2>/tmp/lilhouse-alpha-readiness-last.err; then
+      echo "  ✓ Alpha readiness"
+    else
+      echo "  ✗ Alpha readiness"
+      cat /tmp/lilhouse-alpha-readiness-last.err 2>/dev/null || true
+    fi
+
+    dhcp_active="$(pihole-FTL --config dhcp.active 2>/dev/null || true)"
+    dhcp_start="$(pihole-FTL --config dhcp.start 2>/dev/null || true)"
+    dhcp_end="$(pihole-FTL --config dhcp.end 2>/dev/null || true)"
+    dhcp_router="$(pihole-FTL --config dhcp.router 2>/dev/null || true)"
+    if [ "$dhcp_active" = "true" ]; then
+      echo "  ✓ DHCP active ($dhcp_start-$dhcp_end, router $dhcp_router)"
+    else
+      echo "  ✗ DHCP active"
+    fi
+
+    if ss -lunp 2>/dev/null | grep -q ':67'; then
+      echo "  ✓ DHCP listener on UDP :67"
+    else
+      echo "  ✗ DHCP listener on UDP :67"
+    fi
+
+    if [ "$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo 0)" = "1" ]; then
+      echo "  ✓ IPv4 forwarding"
+    else
+      echo "  ✗ IPv4 forwarding"
+    fi
+
+    NFT_CMD=nft
+    nft_rules="$("$NFT_CMD" list ruleset 2>/dev/null || true)"
+    if printf "%s\n" "$nft_rules" | awk '/192[.]168[.]2[.]0[/]24/ && /masquerade/ {found=1} END{exit !found}'; then
+      echo "  ✓ NAT masquerade"
+    else
+      echo "  ✗ NAT masquerade"
+    fi
+
+    for svc in systemd-networkd nftables unbound pihole-FTL lilhouse-cake.service lilhouse-current-state.timer lilhouse-storage-health.timer; do
+      if systemctl is-active --quiet "$svc" 2>/dev/null; then
+        echo "  ✓ $svc"
+      else
+        echo "  ✗ $svc"
+      fi
+    done
+
+    echo
+    echo "Next step: plug a device into the LAN side."
+    echo "It should receive 192.168.2.x with gateway/DNS 192.168.2.1."
+  fi
+
+  echo
+  echo "Reports:"
+  echo "  answers: $answers"
+  echo "  report:  $report"
+  echo "  logs:    ${LOG_DIR:-$WORK_DIR/logs}"
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --wizard)
@@ -292,31 +407,31 @@ if [ "$MODE" = "wizard" ]; then
 
   echo
   echo "======================================"
-  echo " LilHouse Router first-run installer"
+  echo " LilHouse Agentic Router Installer"
   echo "======================================"
+  echo
+  echo "Fresh Debian + two wired NICs = smart home router."
   echo
 
   detect_interfaces
 
-  echo "Install target:"
-  echo "  1) VM / first-install simulation"
-  echo "  2) Full throwaway VM install test"
-  echo "  3) Real router dry-run only - not exposed yet"
+  echo "Install mode:"
+  echo "  1) Full router install on this machine/test router  [default]"
+  echo "  2) Dry-run simulation only"
   echo
   choice="$(ask_default "Choose mode" "1")"
   case "$choice" in
-    1) MODE="vm" ;;
-    2)
+    ""|1)
       MODE="vm-live"
       THROWAWAY_VM=1
       ;;
-    3)
-      echo "Real router dry-run mode will be added after VM-live install testing."
+    2)
       MODE="vm"
       ;;
     *)
-      echo "Unknown choice. Using VM/simulation mode."
-      MODE="vm"
+      echo "Unknown choice. Using full router install."
+      MODE="vm-live"
+      THROWAWAY_VM=1
       ;;
   esac
 
@@ -344,36 +459,52 @@ EOF_DETECT
     LAN_DEFAULT="${LILHOUSE_LAN_GUESS:-$LAN_DEFAULT}"
 
     echo
-    echo "Auto-detected likely router layout:"
-    echo "  WAN guess: $WAN_DEFAULT"
-    echo "  LAN guess: $LAN_DEFAULT"
-    echo "You can override these if they are wrong."
+    echo "Network layout:"
+    echo "  WAN: $WAN_DEFAULT  [detected]"
+    echo "  LAN: $LAN_DEFAULT  [detected]"
+    echo "Press Enter to accept, or type a different interface."
   fi
 fi
 
 WAN="$(ask_default "WAN interface" "${WAN:-$WAN_DEFAULT}")"
+while ! iface_exists "$WAN"; do
+  echo "WAN interface not found: $WAN"
+  WAN="$(ask_default "WAN interface" "$WAN_DEFAULT")"
+done
+
 LAN="$(ask_default "LAN interface" "${LAN:-$LAN_DEFAULT}")"
+while ! iface_exists "$LAN"; do
+  echo "LAN interface not found: $LAN"
+  LAN="$(ask_default "LAN interface" "$LAN_DEFAULT")"
+done
+
+if [ "$WAN" = "$LAN" ]; then
+  echo "ERROR: WAN and LAN cannot be the same interface." >&2
+  exit 2
+fi
+
   CAKE="yes"
   AI_AGENT="yes"
   MOBILE_ALERTS="$(ask_yes_no "Configure mobile push alerts now? You can choose no and set them up after install." "${MOBILE_ALERTS:-no}")"
 
   echo
-  echo "Summary:"
-  echo "  mode=$MODE"
+  echo "Install summary:"
+  if [ "$MODE" = "vm-live" ]; then DISPLAY_MODE="full-install"; else DISPLAY_MODE="dry-run"; fi
+  echo "  mode=$DISPLAY_MODE"
   echo "  wan=$WAN"
   echo "  lan=$LAN"
-  echo "  appliance_stack=full_required"
-  echo "  cake=required"
-  echo "  dns=required_pihole_unbound"
-  echo "  ai_agent=required_core_agent"
-  echo "  mobile_alerts=$MOBILE_ALERTS"
+  echo "  lan_gateway=192.168.2.1"
+  echo "  dhcp_range=192.168.2.100-192.168.2.200"
+  echo "  dns=Pi-hole + Unbound"
+  echo "  firewall=nftables NAT"
+  echo "  sqm=CAKE"
   echo "  work_dir=$WORK_DIR"
   echo
 
   if [ "$MODE" = "vm-live" ]; then
-    confirm="$(ask_yes_no "Continue and install into / on this disposable VM?" "no")"
+    confirm="$(ask_yes_no "Continue with router install?" "yes")"
   else
-    confirm="$(ask_yes_no "Continue with safe dry-run/simulation?" "yes")"
+    confirm="$(ask_yes_no "Continue with dry-run simulation?" "yes")"
   fi
 
   if [ "$confirm" != "yes" ]; then
@@ -405,6 +536,19 @@ CAKE="${CAKE:-yes}"
 AI_AGENT="${AI_AGENT:-yes}"
 MOBILE_ALERTS="${MOBILE_ALERTS:-no}"
 
+if ! iface_exists "$WAN"; then
+  echo "ERROR: WAN interface not found: $WAN" >&2
+  exit 2
+fi
+if ! iface_exists "$LAN"; then
+  echo "ERROR: LAN interface not found: $LAN" >&2
+  exit 2
+fi
+if [ "$WAN" = "$LAN" ]; then
+  echo "ERROR: WAN and LAN cannot be the same interface." >&2
+  exit 2
+fi
+
 BUNDLE="$REPO_DIR/bin/lilhouse-router-vm-readiness-bundle"
 LIVE_ORCH="$REPO_DIR/bin/lilhouse-router-live-orchestrator"
 APPLIANCE_PREP_REPORTER="$REPO_DIR/bin/lilhouse-router-appliance-prep-report"
@@ -426,66 +570,86 @@ fi
 ANSWERS="$WORK_DIR/easy-install-answers.json"
 write_answers_json "$ANSWERS"
 
+LOG_DIR="$WORK_DIR/logs"
+mkdir -p "$LOG_DIR"
+
+run_logged() {
+  label="$1"
+  logfile="$2"
+  shift 2
+
+  echo "  • $label..."
+  if "$@" >"$logfile" 2>&1; then
+    echo "    ✓ done"
+  else
+    echo "    ✗ failed"
+    echo
+    echo "Last log lines from $logfile:"
+    tail -80 "$logfile" 2>/dev/null || true
+    exit 1
+  fi
+}
+
 echo
-echo "LilHouse easy installer"
-echo "mode=$MODE"
-echo "repo=$REPO_DIR"
-echo "work_dir=$WORK_DIR"
-echo "wan=$WAN"
-echo "lan=$LAN"
-echo "cake=$CAKE"
-echo "ai_agent=$AI_AGENT"
-echo "mobile_alerts=$MOBILE_ALERTS"
+echo "======================================"
+echo " LilHouse Agentic Router Installer"
+echo "======================================"
+echo
+if [ "$MODE" = "vm-live" ]; then DISPLAY_MODE="full-install"; else DISPLAY_MODE="dry-run"; fi
+echo "Mode:       $DISPLAY_MODE"
+echo "WAN:        $WAN"
+echo "LAN:        $LAN"
+echo "Gateway:    192.168.2.1"
+echo "DHCP:       192.168.2.100-192.168.2.200"
+echo "Work dir:   $WORK_DIR"
+echo "Logs:       $LOG_DIR"
+echo
 
 if [ "$MODE" = "vm" ]; then
-  echo
-  echo "Running VM readiness bundle..."
-
-  "$BUNDLE" \
+  echo "Running dry-run simulation..."
+  run_logged "Building VM readiness bundle" "$LOG_DIR/01-vm-readiness-bundle.log" \
+    "$BUNDLE" \
     --work-dir "$WORK_DIR/vm-readiness-bundle" \
     --wan "$WAN" \
     --lan "$LAN" \
     --vm-nic-bypass-key "$VM_BYPASS_KEY" \
     --yes \
-    --out "$OUT" >/tmp/lilhouse-easy-install-last.json
+    --out "$OUT"
 
   print_result "$OUT" "$ANSWERS"
   exit 0
 fi
 
+echo "Installing..."
+# Audit safety marker: WARNING: --vm-live installs/activates into / on this disposable VM.
+echo "Detailed logs are saved if anything fails. Final checks will show whether the install was successful."
 echo
-echo "WARNING: --vm-live installs/activates into / on this disposable VM."
 
-echo
 echo "Resetting VM-live work reports..."
 rm -rf "$WORK_DIR/vm-live-prep" "$WORK_DIR/vm-live-work" "$WORK_DIR/vm-live-backup"
 rm -f "$WORK_DIR/vm-live-install-report.json"
 
-echo
-echo "Step 1/3: preparing full LilHouse appliance stack..."
-"$APPLIANCE_INSTALL" \
+run_logged "Installing packages, DNS/DHCP, firewall, CAKE and telemetry" "$LOG_DIR/01-appliance-install.log" \
+  "$APPLIANCE_INSTALL" \
   --prepare-only \
   --yes \
   --wan "$WAN" \
   --lan "$LAN"
 
-echo
-echo "Step 2/3: generating VM preview/preflight..."
 PREP_WORK="$WORK_DIR/vm-live-prep"
 PREP_REPORT="$WORK_DIR/vm-live-prep-report.json"
 
-"$BUNDLE" \
+run_logged "Building install preview and preflight checks" "$LOG_DIR/02-preflight.log" \
+  "$BUNDLE" \
   --work-dir "$PREP_WORK" \
   --wan "$WAN" \
   --lan "$LAN" \
   --vm-nic-bypass-key "$VM_BYPASS_KEY" \
   --yes \
-  --out "$PREP_REPORT" >/tmp/lilhouse-easy-install-vm-live-prep-last.json
+  --out "$PREP_REPORT"
 
-echo
-echo "Step 3/3: executing guarded live chain against / on throwaway VM..."
-
-"$LIVE_ORCH" \
+run_logged "Applying guarded live configuration" "$LOG_DIR/03-live-orchestrator.log" \
+  "$LIVE_ORCH" \
   --preflight-report "$PREP_WORK/vm-preflight.json" \
   --preview-dir "$PREP_WORK/wizard/preview" \
   --backup-dir "$WORK_DIR/vm-live-backup" \
@@ -497,5 +661,7 @@ echo "Step 3/3: executing guarded live chain against / on throwaway VM..."
   --operator-phrase "$LIVE_OPERATOR_PHRASE" \
   --out "$OUT"
 
-"$APPLIANCE_PREP_REPORTER" --report "$OUT" --wan "$WAN" --lan "$LAN"
+run_logged "Running final appliance checks" "$LOG_DIR/04-appliance-prep-report.log" \
+  "$APPLIANCE_PREP_REPORTER" --report "$OUT" --wan "$WAN" --lan "$LAN"
+
 print_result "$OUT" "$ANSWERS"
