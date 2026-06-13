@@ -11,6 +11,7 @@ DHCP_START="10.23.0.100"
 DHCP_END="10.23.0.200"
 CAKE_DOWN="100mbit"
 CAKE_UP="20mbit"
+LILHOUSE_PIHOLE_ADLISTS="${LILHOUSE_PIHOLE_ADLISTS:-$REPO_DIR/config/pihole-adlists.txt}"
 CAKE_IFB="ifb0"
 PREPARE_ONLY=0
 YES=0
@@ -241,6 +242,23 @@ DNSMASQEOF
   pihole-FTL --config dhcp.router "$LAN_IP"
   pihole-FTL --config dhcp.leaseTime "24h"
   pihole-FTL --config dhcp.active true
+
+  if [ -f "$LILHOUSE_PIHOLE_ADLISTS" ]; then
+    echo
+    echo "=== Importing LilHouse Pi-hole adlists ==="
+
+    while IFS= read -r ADLIST_URL || [ -n "$ADLIST_URL" ]; do
+      case "$ADLIST_URL" in
+        ""|"#"*) continue ;;
+      esac
+
+      echo "Adding adlist: $ADLIST_URL"
+      pihole-FTL sqlite3 /etc/pihole/gravity.db \
+        "INSERT OR IGNORE INTO adlist (address, enabled, comment) VALUES ('$ADLIST_URL', 1, 'LilHouse default');"
+    done < "$LILHOUSE_PIHOLE_ADLISTS"
+
+    pihole -g
+  fi
 
   systemctl enable pihole-FTL
   systemctl restart pihole-FTL

@@ -1,0 +1,13 @@
+# LilHouse default Pi-hole adlists
+# One URL per line.
+# Lines starting with # are ignored.
+#
+# Keep this conservative for alpha. Operators can add/remove lists before install.
+
+https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
+
+# Optional stronger all-in-one list:
+# https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/pro.txt
+
+# Optional broad OISD list:
+# https://big.oisd.nl/
