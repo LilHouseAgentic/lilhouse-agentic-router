@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+set -u
+
+LAN_IP="${LILHOUSE_LAN_IP:-192.168.2.1}"
+LAN_NET="${LILHOUSE_LAN_NET:-192.168.2.0/24}"
+DHCP_START="${LILHOUSE_DHCP_START:-192.168.2.100}"
+DHCP_END="${LILHOUSE_DHCP_END:-192.168.2.200}"
+FAIL=0
+WARN=0
+
+ok() {
+  echo "  ✓ $1"
+}
+
+bad() {
+  echo "  ✗ $1"
+  FAIL=1
+}
+
+warn() {
+  echo "  ! $1"
+  WARN=1
+}
+
+have_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+is_active() {
+  systemctl is-active --quiet "$1" 2>/dev/null
+}
+
+echo
+echo "======================================"
+echo " LilHouse Router Status"
+echo "======================================"
+echo
+echo "Expected LAN:"
+echo "  gateway: $LAN_IP"
+echo "  subnet:  $LAN_NET"
+echo "  DHCP:    $DHCP_START-$DHCP_END"
+echo
+
+echo "Network:"
+if ip route show default 2>/dev/null | grep -q '^default '; then
+  ok "WAN default route present"
+  ip route show default 2>/dev/null | sed 's/^/    /'
+else
+  bad "WAN default route missing"
+fi
+
+if ip -br addr 2>/dev/null | grep -q "$LAN_IP"; then
+  ok "LAN gateway address present ($LAN_IP)"
+else
+  bad "LAN gateway address missing ($LAN_IP)"
+fi
+
+echo
+echo "DHCP:"
+if have_cmd pihole-FTL; then
+  dhcp_active="$(pihole-FTL --config dhcp.active 2>/dev/null || true)"
+  dhcp_start="$(pihole-FTL --config dhcp.start 2>/dev/null || true)"
+  dhcp_end="$(pihole-FTL --config dhcp.end 2>/dev/null || true)"
+  dhcp_router="$(pihole-FTL --config dhcp.router 2>/dev/null || true)"
+
+  if [ "$dhcp_active" = "true" ]; then
+    ok "Pi-hole DHCP active"
+  else
+    bad "Pi-hole DHCP not active"
+  fi
+
+  if [ "$dhcp_start" = "$DHCP_START" ] && [ "$dhcp_end" = "$DHCP_END" ]; then
+    ok "DHCP range $dhcp_start-$dhcp_end"
+  else
+    warn "DHCP range is $dhcp_start-$dhcp_end, expected $DHCP_START-$DHCP_END"
+  fi
+
+  if [ "$dhcp_router" = "$LAN_IP" ]; then
+    ok "DHCP router is $dhcp_router"
+  else
+    bad "DHCP router is $dhcp_router, expected $LAN_IP"
+  fi
+else
+  bad "pihole-FTL command missing"
+fi
+
+if ss -lunp 2>/dev/null | grep -q ':67'; then
+  ok "DHCP listener on UDP :67"
+else
+  bad "DHCP listener on UDP :67 missing"
+fi
+
+echo
+echo "DNS:"
+if is_active pihole-FTL; then
+  ok "Pi-hole FTL active"
+else
+  bad "Pi-hole FTL not active"
+fi
+
+if is_active unbound; then
+  ok "Unbound active"
+else
+  bad "Unbound not active"
+fi
+
+if have_cmd dig; then
+  if dig +time=2 +tries=1 @127.0.0.1 example.com A +short >/tmp/lilhouse-status-dig.out 2>/dev/null && [ -s /tmp/lilhouse-status-dig.out ]; then
+    ok "DNS resolves through local resolver"
+  else
+    warn "DNS test did not return an answer"
+  fi
+else
+  warn "dig command missing; DNS query test skipped"
+fi
+
+echo
+echo "Routing/firewall:"
+if [ "$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo 0)" = "1" ]; then
+  ok "IPv4 forwarding enabled"
+else
+  bad "IPv4 forwarding disabled"
+fi
+
+NFT_CMD=nft
+if have_cmd "$NFT_CMD"; then
+  nft_rules="$("$NFT_CMD" list ruleset 2>/dev/null || true)"
+  if printf "%s\n" "$nft_rules" | awk -v net="$LAN_NET" 'index($0, net) && /masquerade/ {found=1} END{exit !found}'; then
+    ok "NAT masquerade active for $LAN_NET"
+  else
+    bad "NAT masquerade missing for $LAN_NET"
+  fi
+else
+  bad "firewall command missing"
+fi
+
+if is_active nftables; then
+  ok "nftables service active"
+else
+  bad "nftables service not active"
+fi
+
+echo
+echo "CAKE/SQM:"
+if is_active lilhouse-cake.service; then
+  ok "lilhouse-cake.service active"
+else
+  bad "lilhouse-cake.service not active"
+fi
+
+if have_cmd tc; then
+  cake_count="$(tc qdisc show 2>/dev/null | grep -c ' cake ' || true)"
+  if [ "${cake_count:-0}" -gt 0 ]; then
+    ok "CAKE qdisc present"
+  else
+    warn "CAKE qdisc not visible"
+  fi
+else
+  warn "tc command missing; CAKE qdisc check skipped"
+fi
+
+echo
+echo "LilHouse telemetry:"
+if is_active lilhouse-current-state.timer; then
+  ok "current-state timer active"
+else
+  bad "current-state timer not active"
+fi
+
+if is_active lilhouse-storage-health.timer; then
+  ok "storage-health timer active"
+else
+  bad "storage-health timer not active"
+fi
+
+echo
+echo "Client expectation:"
+echo "  A device plugged into the LAN side should receive:"
+echo "    IP:      192.168.2.x"
+echo "    Gateway: $LAN_IP"
+echo "    DNS:     $LAN_IP"
+echo
+
+if [ "$FAIL" -eq 0 ]; then
+  if [ "$WARN" -eq 0 ]; then
+    echo "Status: OK"
+  else
+    echo "Status: OK with warnings"
+  fi
+  exit 0
+else
+  echo "Status: needs attention"
+  exit 1
+fi
