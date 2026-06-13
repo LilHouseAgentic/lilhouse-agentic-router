@@ -276,6 +276,7 @@ backup_existing /usr/local/bin/lilhouse-router-final-deploy-runbook
 backup_existing /usr/local/bin/lilhouse-router-release-candidate
 backup_existing /usr/local/bin/lilhouse-router-release-candidate-summary
 backup_existing /usr/local/bin/lilhouse-status
+backup_existing /usr/local/bin/lilhouse-cake-set
 backup_existing /usr/local/bin/lilhouse-router-status
 backup_existing /etc/systemd/system/lilhouse-current-state.service
 backup_existing /etc/systemd/system/lilhouse-current-state.timer
@@ -339,6 +340,7 @@ install -m 0755 "$REPO_DIR/bin/lilhouse-router-final-deploy-runbook" "$(root_pat
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-release-candidate" "$(root_path /usr/local/bin/lilhouse-router-release-candidate)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-release-candidate-summary" "$(root_path /usr/local/bin/lilhouse-router-release-candidate-summary)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-status" "$(root_path /usr/local/bin/lilhouse-status)"
+install -m 0755 "$REPO_DIR/bin/lilhouse-cake-set" "$(root_path /usr/local/bin/lilhouse-cake-set)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-status" "$(root_path /usr/local/bin/lilhouse-router-status)"
 
 install -m 0644 "$REPO_DIR/systemd/lilhouse-current-state.service" "$(root_path /etc/systemd/system/lilhouse-current-state.service)"
@@ -362,5 +364,6 @@ echo "Try:"
 echo "  lilhouse-current-state"
 echo "  lilhouse-status"
 echo "  lilhouse-router-status"
+echo "  sudo lilhouse-cake-set --down 250 --up 35"
 echo "  systemctl status lilhouse-current-state.timer --no-pager"
 echo "  systemctl status lilhouse-storage-health.timer --no-pager"
