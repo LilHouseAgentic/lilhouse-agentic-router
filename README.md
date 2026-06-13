@@ -8,7 +8,7 @@ Start here:
 
 - [Fresh install guide](docs/FRESH-INSTALL.md)
 
-Alpha warning: test on a spare machine, disposable VM, or test router first.
+Alpha warning: test on a spare machine, disposable VM, or test machine first.
 
 ## Current status
 
