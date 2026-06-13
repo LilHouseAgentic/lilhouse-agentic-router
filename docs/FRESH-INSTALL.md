@@ -38,7 +38,7 @@ else
   git clone "$REPO_URL" "$REPO_DIR"
   cd "$REPO_DIR"
 fi
-./bin/lilhouse-router-appliance-uninstall --yes --allow-live-root || true
+./bin/lilhouse-router-appliance-uninstall --yes --i-am-in-a-throwaway-vm || true
 ./easy-install.sh
 '
 ```
