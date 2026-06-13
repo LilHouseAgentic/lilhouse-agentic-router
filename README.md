@@ -126,3 +126,88 @@ The core appliance alpha path was proven at:
 Next presentation milestone:
 
     v0.3.0-alpha
+
+## Public alpha quickstart
+
+LilHouse Agentic Router is currently a public alpha for fresh Debian test routers, spare machines, or disposable VMs. Do not run the full router installer on a production router unless you are prepared for network interruption and have a recovery path.
+
+### Fresh install
+
+```bash
+git clone https://github.com/LilHouseAgentic/lilhouse-agentic-router.git
+cd lilhouse-agentic-router
+./easy-install.sh
+```
+
+The easy installer will guide you through:
+
+- install mode
+- WAN/LAN interface selection
+- WAN/LAN subnet conflict detection
+- CAKE/SQM profile selection
+- final router health checks
+
+### After install
+
+Check router health:
+
+```bash
+sudo lilhouse-router-status
+```
+
+Change CAKE/SQM speeds later without reinstalling:
+
+```bash
+sudo lilhouse-cake-set --down 220 --up 30
+```
+
+Use a preset CAKE profile:
+
+```bash
+sudo lilhouse-cake-set --profile conservative
+sudo lilhouse-cake-set --profile fast
+sudo lilhouse-cake-set --profile satellite
+```
+
+### CAKE/SQM profiles
+
+The installer currently offers:
+
+- Conservative: `100mbit` down / `20mbit` up
+- Fast: `300mbit` down / `40mbit` up
+- Satellite / variable: `150mbit` down / `20mbit` up
+- Custom: user-provided download/upload values
+
+### WAN/LAN subnet conflict protection
+
+The default LilHouse LAN is:
+
+```text
+192.168.2.1/24
+DHCP: 192.168.2.100-192.168.2.200
+```
+
+If the upstream WAN network overlaps the default LilHouse LAN, the installer warns you and offers a safer alternate LAN such as:
+
+```text
+192.168.50.1/24
+DHCP: 192.168.50.100-192.168.50.200
+```
+
+This helps avoid broken routing when the upstream modem/router is already using the same subnet.
+
+### Useful commands
+
+```bash
+sudo lilhouse-router-status
+sudo lilhouse-cake-set --down 220 --up 30
+sudo systemctl status lilhouse-cake.service --no-pager
+sudo systemctl status pihole-FTL --no-pager
+sudo systemctl status unbound --no-pager
+```
+
+### Current alpha scope
+
+The `v0.3.x` series focuses on safe installation, router defaults, status reporting, manual CAKE tuning, and public-alpha usability.
+
+Automatic self-healing, speedtest-based CAKE tuning, push alerts, and read-only router diagnosis are planned for later alpha releases.
