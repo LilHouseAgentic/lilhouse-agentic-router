@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -u
 
+ROUTER_ENV="${LILHOUSE_ROUTER_ENV:-/etc/lilhouse/router.env}"
+if [ -f "$ROUTER_ENV" ]; then
+  # shellcheck disable=SC1090
+  . "$ROUTER_ENV"
+fi
+
 LAN_IP="${LILHOUSE_LAN_IP:-192.168.2.1}"
 LAN_NET="${LILHOUSE_LAN_NET:-192.168.2.0/24}"
 DHCP_START="${LILHOUSE_DHCP_START:-192.168.2.100}"
