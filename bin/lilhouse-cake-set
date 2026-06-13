@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ENV_FILE="${LILHOUSE_CAKE_ENV:-/etc/lilhouse/cake.env}"
+DOWN=""
+UP=""
+PROFILE=""
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  sudo lilhouse-cake-set --down 250 --up 35
+  sudo lilhouse-cake-set --down 250mbit --up 35mbit
+  sudo lilhouse-cake-set 250 35
+  sudo lilhouse-cake-set --profile conservative
+  sudo lilhouse-cake-set --profile fast
+  sudo lilhouse-cake-set --profile satellite
+
+Profiles:
+  conservative  100mbit down / 20mbit up
+  fast          300mbit down / 40mbit up
+  satellite     150mbit down / 20mbit up
+USAGE
+}
+
+normalise_rate() {
+  value="$1"
+  value="${value%mbit}"
+  value="${value%Mbit}"
+  value="${value%mbps}"
+  value="${value%Mbps}"
+
+  case "$value" in
+    ''|*[!0-9.]*)
+      echo "ERROR: invalid rate: $1" >&2
+      exit 2
+      ;;
+  esac
+
+  printf "%smbit" "$value"
+}
+
+need_root() {
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "ERROR: lilhouse-cake-set must run as root." >&2
+    echo "Try: sudo lilhouse-cake-set --down 250 --up 35" >&2
+    exit 2
+  fi
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --down)
+      DOWN="$(normalise_rate "${2:?missing --down value}")"
+      shift 2
+      ;;
+    --up)
+      UP="$(normalise_rate "${2:?missing --up value}")"
+      shift 2
+      ;;
+    --profile)
+      PROFILE="${2:?missing --profile value}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      if [ -z "$DOWN" ]; then
+        DOWN="$(normalise_rate "$1")"
+        shift
+      elif [ -z "$UP" ]; then
+        UP="$(normalise_rate "$1")"
+        shift
+      else
+        echo "ERROR: unexpected argument: $1" >&2
+        usage >&2
+        exit 2
+      fi
+      ;;
+  esac
+done
+
+case "$PROFILE" in
+  "")
+    ;;
+  conservative)
+    DOWN="100mbit"
+    UP="20mbit"
+    ;;
+  fast)
+    DOWN="300mbit"
+    UP="40mbit"
+    ;;
+  satellite)
+    DOWN="150mbit"
+    UP="20mbit"
+    ;;
+  *)
+    echo "ERROR: unknown profile: $PROFILE" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+if [ -z "$DOWN" ] || [ -z "$UP" ]; then
+  echo "ERROR: both down and up speeds are required." >&2
+  usage >&2
+  exit 2
+fi
+
+need_root
+
+if [ ! -f "$ENV_FILE" ]; then
+  echo "ERROR: CAKE config not found: $ENV_FILE" >&2
+  echo "Install LilHouse router mode first." >&2
+  exit 2
+fi
+
+backup="${ENV_FILE}.bak.cake-set.$(date +%Y%m%d-%H%M%S)"
+cp -a "$ENV_FILE" "$backup"
+
+tmp="$(mktemp)"
+awk -v down="$DOWN" -v up="$UP" -v profile="${PROFILE:-custom}" '
+  BEGIN {
+    saw_down=0
+    saw_up=0
+    saw_profile=0
+  }
+  /^LILHOUSE_CAKE_DOWN=/ {
+    print "LILHOUSE_CAKE_DOWN=" down
+    saw_down=1
+    next
+  }
+  /^LILHOUSE_CAKE_UP=/ {
+    print "LILHOUSE_CAKE_UP=" up
+    saw_up=1
+    next
+  }
+  /^LILHOUSE_CAKE_PROFILE=/ {
+    print "LILHOUSE_CAKE_PROFILE=" profile
+    saw_profile=1
+    next
+  }
+  { print }
+  END {
+    if (!saw_profile) print "LILHOUSE_CAKE_PROFILE=" profile
+    if (!saw_down) print "LILHOUSE_CAKE_DOWN=" down
+    if (!saw_up) print "LILHOUSE_CAKE_UP=" up
+  }
+' "$ENV_FILE" > "$tmp"
+
+install -m 0644 "$tmp" "$ENV_FILE"
+rm -f "$tmp"
+
+systemctl restart lilhouse-cake.service
+
+if systemctl is-active --quiet lilhouse-cake.service; then
+  echo "CAKE updated."
+  echo "  down: $DOWN"
+  echo "  up:   $UP"
+  echo "  env:  $ENV_FILE"
+  echo "  backup: $backup"
+else
+  echo "ERROR: lilhouse-cake.service did not restart cleanly." >&2
+  echo "Backup: $backup" >&2
+  exit 1
+fi
