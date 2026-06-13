@@ -89,6 +89,10 @@ detect_interfaces() {
   echo
 }
 
+iface_exists() {
+  ip link show "$1" >/dev/null 2>&1
+}
+
 install_base_prereqs() {
   echo
   echo "Installing base prerequisites..."
@@ -463,7 +467,22 @@ EOF_DETECT
 fi
 
 WAN="$(ask_default "WAN interface" "${WAN:-$WAN_DEFAULT}")"
+while ! iface_exists "$WAN"; do
+  echo "WAN interface not found: $WAN"
+  WAN="$(ask_default "WAN interface" "$WAN_DEFAULT")"
+done
+
 LAN="$(ask_default "LAN interface" "${LAN:-$LAN_DEFAULT}")"
+while ! iface_exists "$LAN"; do
+  echo "LAN interface not found: $LAN"
+  LAN="$(ask_default "LAN interface" "$LAN_DEFAULT")"
+done
+
+if [ "$WAN" = "$LAN" ]; then
+  echo "ERROR: WAN and LAN cannot be the same interface." >&2
+  exit 2
+fi
+
   CAKE="yes"
   AI_AGENT="yes"
   MOBILE_ALERTS="$(ask_yes_no "Configure mobile push alerts now? You can choose no and set them up after install." "${MOBILE_ALERTS:-no}")"
@@ -516,6 +535,19 @@ LAN="${LAN:-eth1}"
 CAKE="${CAKE:-yes}"
 AI_AGENT="${AI_AGENT:-yes}"
 MOBILE_ALERTS="${MOBILE_ALERTS:-no}"
+
+if ! iface_exists "$WAN"; then
+  echo "ERROR: WAN interface not found: $WAN" >&2
+  exit 2
+fi
+if ! iface_exists "$LAN"; then
+  echo "ERROR: LAN interface not found: $LAN" >&2
+  exit 2
+fi
+if [ "$WAN" = "$LAN" ]; then
+  echo "ERROR: WAN and LAN cannot be the same interface." >&2
+  exit 2
+fi
 
 BUNDLE="$REPO_DIR/bin/lilhouse-router-vm-readiness-bundle"
 LIVE_ORCH="$REPO_DIR/bin/lilhouse-router-live-orchestrator"
