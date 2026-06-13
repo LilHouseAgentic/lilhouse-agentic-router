@@ -10,6 +10,11 @@ WAN=""
 LAN=""
 WORK_DIR="/tmp/lilhouse-first-install"
 OUT=""
+LAN_CIDR=""
+LAN_IP=""
+LAN_NET=""
+DHCP_START=""
+DHCP_END=""
 CAKE=""
 CAKE_PROFILE=""
 CAKE_DOWN=""
@@ -42,6 +47,9 @@ Options:
   --yes             Non-interactive confirmation
   --wan IFACE       WAN interface
   --lan IFACE       LAN interface
+  --lan-cidr CIDR   LAN gateway CIDR, default 192.168.2.1/24
+  --dhcp-start IP    DHCP start, default 192.168.2.100
+  --dhcp-end IP      DHCP end, default 192.168.2.200
   --cake yes|no     Enable CAKE/SQM in generated plan
   --cake-profile NAME
                     CAKE profile: conservative, fast, satellite, custom
@@ -109,6 +117,34 @@ normalise_mbit() {
   printf "%smbit" "$value"
 }
 
+set_lan_from_cidr() {
+  LAN_CIDR="$1"
+  LAN_IP="${LAN_CIDR%/*}"
+  LAN_NET="$(python3 -c 'import ipaddress,sys; print(ipaddress.ip_interface(sys.argv[1]).network)' "$LAN_CIDR")"
+
+  prefix="$(python3 -c 'import ipaddress,sys; i=ipaddress.ip_interface(sys.argv[1]); print(".".join(str(i.ip).split(".")[:3]))' "$LAN_CIDR")"
+  DHCP_START="${DHCP_START:-${prefix}.100}"
+  DHCP_END="${DHCP_END:-${prefix}.200}"
+}
+
+set_lan_defaults() {
+  set_lan_from_cidr "${LAN_CIDR:-192.168.2.1/24}"
+}
+
+detect_wan_ipv4_cidr() {
+  ip -4 -o addr show dev "$1" scope global 2>/dev/null | awk '{print $4; exit}'
+}
+
+networks_overlap() {
+  python3 - "$1" "$2" <<'PY_NET'
+import ipaddress
+import sys
+a = ipaddress.ip_interface(sys.argv[1]).network
+b = ipaddress.ip_interface(sys.argv[2]).network
+sys.exit(0 if a.overlaps(b) else 1)
+PY_NET
+}
+
 set_cake_profile_defaults() {
   CAKE_PROFILE="${CAKE_PROFILE:-conservative}"
 
@@ -168,19 +204,24 @@ install_lilhouse_core() {
 
 write_answers_json() {
   answers="$1"
-  python3 - "$answers" "$MODE" "$WAN" "$LAN" "$CAKE" "$CAKE_PROFILE" "$CAKE_DOWN" "$CAKE_UP" "$AI_AGENT" "$MOBILE_ALERTS" "$WORK_DIR" <<'PY'
+  python3 - "$answers" "$MODE" "$WAN" "$LAN" "$LAN_CIDR" "$LAN_IP" "$LAN_NET" "$DHCP_START" "$DHCP_END" "$CAKE" "$CAKE_PROFILE" "$CAKE_DOWN" "$CAKE_UP" "$AI_AGENT" "$MOBILE_ALERTS" "$WORK_DIR" <<'PY'
 import json
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
 
-path, mode, wan, lan, cake, cake_profile, cake_down, cake_up, ai_agent, mobile_alerts, work_dir = sys.argv[1:]
+path, mode, wan, lan, lan_cidr, lan_ip, lan_net, dhcp_start, dhcp_end, cake, cake_profile, cake_down, cake_up, ai_agent, mobile_alerts, work_dir = sys.argv[1:]
 data = {
     "schema": "lilhouse.easy_install_answers.v1",
     "generated_at": datetime.now(timezone.utc).isoformat(),
     "mode": mode,
     "wan": wan,
     "lan": lan,
+    "lan_cidr": lan_cidr,
+    "lan_ip": lan_ip,
+    "lan_net": lan_net,
+    "dhcp_start": dhcp_start,
+    "dhcp_end": dhcp_end,
     "features": {
         "cake": cake == "yes",
         "cake_profile": cake_profile,
@@ -289,9 +330,10 @@ display_mode = "full-install" if mode == "vm-live" else "dry-run" if mode == "vm
 print(f"Mode: {display_mode}")
 print(f"WAN:  {wan}")
 print(f"LAN:  {lan}")
-print("LAN gateway: 192.168.2.1")
-print("DHCP range:  192.168.2.100-192.168.2.200")
-print("DNS:         192.168.2.1")
+print(f"LAN gateway: {answers.get('lan_ip', '192.168.2.1')}")
+print(f"LAN subnet:  {answers.get('lan_net', '192.168.2.0/24')}")
+print(f"DHCP range:  {answers.get('dhcp_start', '192.168.2.100')}-{answers.get('dhcp_end', '192.168.2.200')}")
+print(f"DNS:         {answers.get('lan_ip', '192.168.2.1')}")
 print()
 print("Features:")
 print(f"  CAKE/SQM:        {'yes' if features.get('cake') else 'no'}")
@@ -350,7 +392,7 @@ PY_CLEAN_RESULT
 
     NFT_CMD=nft
     nft_rules="$("$NFT_CMD" list ruleset 2>/dev/null || true)"
-    if printf "%s\n" "$nft_rules" | awk '/192[.]168[.]2[.]0[/]24/ && /masquerade/ {found=1} END{exit !found}'; then
+    if printf "%s\n" "$nft_rules" | awk -v net="$LAN_NET" 'index($0, net) && /masquerade/ {found=1} END{exit !found}'; then
       echo "  ✓ NAT masquerade"
     else
       echo "  ✗ NAT masquerade"
@@ -366,7 +408,7 @@ PY_CLEAN_RESULT
 
     echo
     echo "Next step: plug a device into the LAN side."
-    echo "It should receive 192.168.2.x with gateway/DNS 192.168.2.1."
+    echo "It should receive an address in $LAN_NET with gateway/DNS $LAN_IP."
     echo
     echo "Later, check router health with: sudo lilhouse-router-status"
   fi
@@ -406,6 +448,18 @@ while [ "$#" -gt 0 ]; do
       ;;
     --lan)
       LAN="${2:?missing value for --lan}"
+      shift 2
+      ;;
+    --lan-cidr)
+      LAN_CIDR="${2:?missing value for --lan-cidr}"
+      shift 2
+      ;;
+    --dhcp-start)
+      DHCP_START="${2:?missing value for --dhcp-start}"
+      shift 2
+      ;;
+    --dhcp-end)
+      DHCP_END="${2:?missing value for --dhcp-end}"
       shift 2
       ;;
     --cake)
@@ -546,6 +600,41 @@ if [ "$WAN" = "$LAN" ]; then
   exit 2
 fi
 
+  set_lan_defaults
+  WAN_IPV4_CIDR="$(detect_wan_ipv4_cidr "$WAN" || true)"
+
+  if [ -n "$WAN_IPV4_CIDR" ] && networks_overlap "$WAN_IPV4_CIDR" "$LAN_CIDR"; then
+    echo
+    echo "LAN subnet conflict detected."
+    echo "  WAN appears to be on: $WAN_IPV4_CIDR"
+    echo "  LilHouse default LAN: $LAN_NET"
+    echo
+    echo "Choose a different LilHouse LAN:"
+    echo "  1) 192.168.50.1/24  [recommended]"
+    echo "  2) 10.10.10.1/24"
+    echo "  3) Custom /24 gateway CIDR"
+    echo
+    lan_choice="$(ask_default "Choose LAN subnet" "1")"
+    DHCP_START=""
+    DHCP_END=""
+    case "$lan_choice" in
+      ""|1)
+        set_lan_from_cidr "192.168.50.1/24"
+        ;;
+      2)
+        set_lan_from_cidr "10.10.10.1/24"
+        ;;
+      3)
+        custom_lan="$(ask_default "Custom LAN gateway CIDR" "192.168.50.1/24")"
+        set_lan_from_cidr "$custom_lan"
+        ;;
+      *)
+        echo "Unknown choice. Using 192.168.50.1/24."
+        set_lan_from_cidr "192.168.50.1/24"
+        ;;
+    esac
+  fi
+
   CAKE="yes"
 
   echo
@@ -599,8 +688,9 @@ fi
   echo "  mode=$DISPLAY_MODE"
   echo "  wan=$WAN"
   echo "  lan=$LAN"
-  echo "  lan_gateway=192.168.2.1"
-  echo "  dhcp_range=192.168.2.100-192.168.2.200"
+  echo "  lan_gateway=$LAN_IP"
+  echo "  lan_subnet=$LAN_NET"
+  echo "  dhcp_range=$DHCP_START-$DHCP_END"
   echo "  dns=Pi-hole + Unbound"
   echo "  firewall=nftables NAT"
   echo "  sqm=CAKE ($CAKE_PROFILE, $CAKE_DOWN down / $CAKE_UP up)"
@@ -638,6 +728,7 @@ fi
 
 WAN="${WAN:-eth0}"
 LAN="${LAN:-eth1}"
+set_lan_defaults
 CAKE="${CAKE:-yes}"
 set_cake_profile_defaults
 AI_AGENT="${AI_AGENT:-yes}"
@@ -706,8 +797,9 @@ if [ "$MODE" = "vm-live" ]; then DISPLAY_MODE="full-install"; else DISPLAY_MODE=
 echo "Mode:       $DISPLAY_MODE"
 echo "WAN:        $WAN"
 echo "LAN:        $LAN"
-echo "Gateway:    192.168.2.1"
-echo "DHCP:       192.168.2.100-192.168.2.200"
+echo "Gateway:    $LAN_IP"
+echo "Subnet:     $LAN_NET"
+echo "DHCP:       $DHCP_START-$DHCP_END"
 echo "CAKE:       $CAKE_PROFILE ($CAKE_DOWN down / $CAKE_UP up)"
 echo "Work dir:   $WORK_DIR"
 echo "Logs:       $LOG_DIR"
@@ -743,6 +835,9 @@ run_logged "Installing packages, DNS/DHCP, firewall, CAKE and telemetry" "$LOG_D
   --yes \
   --wan "$WAN" \
   --lan "$LAN" \
+  --lan-cidr "$LAN_CIDR" \
+  --dhcp-start "$DHCP_START" \
+  --dhcp-end "$DHCP_END" \
   --cake-down "$CAKE_DOWN" \
   --cake-up "$CAKE_UP"
 

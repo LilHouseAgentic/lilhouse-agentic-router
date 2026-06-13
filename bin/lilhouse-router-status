@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -u
 
+ROUTER_ENV="${LILHOUSE_ROUTER_ENV:-/etc/lilhouse/router.env}"
+if [ -f "$ROUTER_ENV" ]; then
+  # shellcheck disable=SC1090
+  . "$ROUTER_ENV"
+fi
+
 LAN_IP="${LILHOUSE_LAN_IP:-192.168.2.1}"
 LAN_NET="${LILHOUSE_LAN_NET:-192.168.2.0/24}"
 DHCP_START="${LILHOUSE_DHCP_START:-192.168.2.100}"
@@ -105,7 +111,16 @@ else
 fi
 
 if have_cmd dig; then
-  if dig +time=2 +tries=1 @127.0.0.1 example.com A +short >/tmp/lilhouse-status-dig.out 2>/dev/null && [ -s /tmp/lilhouse-status-dig.out ]; then
+  dns_ok=0
+  for attempt in 1 2 3; do
+    if dig +time=2 +tries=1 @127.0.0.1 example.com A +short >/tmp/lilhouse-status-dig.out 2>/dev/null && [ -s /tmp/lilhouse-status-dig.out ]; then
+      dns_ok=1
+      break
+    fi
+    sleep 1
+  done
+
+  if [ "$dns_ok" -eq 1 ]; then
     ok "DNS resolves through local resolver"
   else
     warn "DNS test did not return an answer"
@@ -185,7 +200,7 @@ fi
 echo
 echo "Client expectation:"
 echo "  A device plugged into the LAN side should receive:"
-echo "    IP:      192.168.2.x"
+echo "    IP:      $DHCP_START-$DHCP_END"
 echo "    Gateway: $LAN_IP"
 echo "    DNS:     $LAN_IP"
 echo
