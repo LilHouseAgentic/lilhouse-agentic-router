@@ -142,6 +142,15 @@ fi
 
 echo
 echo "CAKE/SQM:"
+CAKE_ENV="/etc/lilhouse/cake.env"
+if [ -f "$CAKE_ENV" ]; then
+  # shellcheck disable=SC1090
+  . "$CAKE_ENV"
+  ok "configured rates ${LILHOUSE_CAKE_DOWN:-unknown} down / ${LILHOUSE_CAKE_UP:-unknown} up"
+else
+  warn "CAKE config file missing"
+fi
+
 if is_active lilhouse-cake.service; then
   ok "lilhouse-cake.service active"
 else

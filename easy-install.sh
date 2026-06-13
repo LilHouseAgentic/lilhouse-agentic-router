@@ -11,6 +11,9 @@ LAN=""
 WORK_DIR="/tmp/lilhouse-first-install"
 OUT=""
 CAKE=""
+CAKE_PROFILE=""
+CAKE_DOWN=""
+CAKE_UP=""
 AI_AGENT=""
 MOBILE_ALERTS=""
 
@@ -40,6 +43,10 @@ Options:
   --wan IFACE       WAN interface
   --lan IFACE       LAN interface
   --cake yes|no     Enable CAKE/SQM in generated plan
+  --cake-profile NAME
+                    CAKE profile: conservative, fast, satellite, custom
+  --cake-down RATE  CAKE download rate, for example 100mbit
+  --cake-up RATE    CAKE upload rate, for example 20mbit
   --ai yes|no       Enable local agent/AI planning in generated plan
   --mobile-alerts yes|no
                     Enable mobile push alert config in generated plan
@@ -93,6 +100,43 @@ iface_exists() {
   ip link show "$1" >/dev/null 2>&1
 }
 
+normalise_mbit() {
+  value="$1"
+  value="${value%mbit}"
+  value="${value%Mbit}"
+  value="${value%mbps}"
+  value="${value%Mbps}"
+  printf "%smbit" "$value"
+}
+
+set_cake_profile_defaults() {
+  CAKE_PROFILE="${CAKE_PROFILE:-conservative}"
+
+  case "$CAKE_PROFILE" in
+    conservative)
+      CAKE_DOWN="${CAKE_DOWN:-100mbit}"
+      CAKE_UP="${CAKE_UP:-20mbit}"
+      ;;
+    fast)
+      CAKE_DOWN="${CAKE_DOWN:-300mbit}"
+      CAKE_UP="${CAKE_UP:-40mbit}"
+      ;;
+    satellite)
+      CAKE_DOWN="${CAKE_DOWN:-150mbit}"
+      CAKE_UP="${CAKE_UP:-20mbit}"
+      ;;
+    custom)
+      CAKE_DOWN="${CAKE_DOWN:-100mbit}"
+      CAKE_UP="${CAKE_UP:-20mbit}"
+      ;;
+    *)
+      echo "Unknown CAKE profile: $CAKE_PROFILE" >&2
+      echo "Use: conservative, fast, satellite, or custom" >&2
+      exit 2
+      ;;
+  esac
+}
+
 install_base_prereqs() {
   echo
   echo "Installing base prerequisites..."
@@ -124,13 +168,13 @@ install_lilhouse_core() {
 
 write_answers_json() {
   answers="$1"
-  python3 - "$answers" "$MODE" "$WAN" "$LAN" "$CAKE" "$AI_AGENT" "$MOBILE_ALERTS" "$WORK_DIR" <<'PY'
+  python3 - "$answers" "$MODE" "$WAN" "$LAN" "$CAKE" "$CAKE_PROFILE" "$CAKE_DOWN" "$CAKE_UP" "$AI_AGENT" "$MOBILE_ALERTS" "$WORK_DIR" <<'PY'
 import json
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
 
-path, mode, wan, lan, cake, ai_agent, mobile_alerts, work_dir = sys.argv[1:]
+path, mode, wan, lan, cake, cake_profile, cake_down, cake_up, ai_agent, mobile_alerts, work_dir = sys.argv[1:]
 data = {
     "schema": "lilhouse.easy_install_answers.v1",
     "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -139,6 +183,9 @@ data = {
     "lan": lan,
     "features": {
         "cake": cake == "yes",
+        "cake_profile": cake_profile,
+        "cake_down": cake_down,
+        "cake_up": cake_up,
         "ai_agent": ai_agent == "yes",
         "mobile_alerts": mobile_alerts == "yes",
     },
@@ -248,6 +295,8 @@ print("DNS:         192.168.2.1")
 print()
 print("Features:")
 print(f"  CAKE/SQM:        {'yes' if features.get('cake') else 'no'}")
+print(f"  CAKE profile:    {features.get('cake_profile', 'conservative')}")
+print(f"  CAKE rates:      {features.get('cake_down', '100mbit')} down / {features.get('cake_up', '20mbit')} up")
 print(f"  Core agent:      {'yes' if features.get('ai_agent') else 'no'}")
 print(f"  Mobile alerts:   {'yes' if features.get('mobile_alerts') else 'no'}")
 print()
@@ -361,6 +410,18 @@ while [ "$#" -gt 0 ]; do
       ;;
     --cake)
       CAKE="${2:?missing value for --cake}"
+      shift 2
+      ;;
+    --cake-profile)
+      CAKE_PROFILE="${2:?missing value for --cake-profile}"
+      shift 2
+      ;;
+    --cake-down)
+      CAKE_DOWN="${2:?missing value for --cake-down}"
+      shift 2
+      ;;
+    --cake-up)
+      CAKE_UP="${2:?missing value for --cake-up}"
       shift 2
       ;;
     --ai)
@@ -486,6 +547,49 @@ if [ "$WAN" = "$LAN" ]; then
 fi
 
   CAKE="yes"
+
+  echo
+  echo "CAKE/SQM profile:"
+  echo "  1) Conservative / works almost anywhere  [default]"
+  echo "     100 down / 20 up"
+  echo "  2) Fast home connection"
+  echo "     300 down / 40 up"
+  echo "  3) Satellite / variable connection"
+  echo "     150 down / 20 up"
+  echo "  4) Custom"
+  echo
+  cake_choice="$(ask_default "Choose CAKE profile" "1")"
+  case "$cake_choice" in
+    ""|1)
+      CAKE_PROFILE="conservative"
+      CAKE_DOWN="100mbit"
+      CAKE_UP="20mbit"
+      ;;
+    2)
+      CAKE_PROFILE="fast"
+      CAKE_DOWN="300mbit"
+      CAKE_UP="40mbit"
+      ;;
+    3)
+      CAKE_PROFILE="satellite"
+      CAKE_DOWN="150mbit"
+      CAKE_UP="20mbit"
+      ;;
+    4)
+      CAKE_PROFILE="custom"
+      custom_down="$(ask_default "Download speed for CAKE in Mbit" "100")"
+      custom_up="$(ask_default "Upload speed for CAKE in Mbit" "20")"
+      CAKE_DOWN="$(normalise_mbit "$custom_down")"
+      CAKE_UP="$(normalise_mbit "$custom_up")"
+      ;;
+    *)
+      echo "Unknown choice. Using Conservative."
+      CAKE_PROFILE="conservative"
+      CAKE_DOWN="100mbit"
+      CAKE_UP="20mbit"
+      ;;
+  esac
+
   AI_AGENT="yes"
   MOBILE_ALERTS="$(ask_yes_no "Configure mobile push alerts now? You can choose no and set them up after install." "${MOBILE_ALERTS:-no}")"
 
@@ -499,7 +603,7 @@ fi
   echo "  dhcp_range=192.168.2.100-192.168.2.200"
   echo "  dns=Pi-hole + Unbound"
   echo "  firewall=nftables NAT"
-  echo "  sqm=CAKE"
+  echo "  sqm=CAKE ($CAKE_PROFILE, $CAKE_DOWN down / $CAKE_UP up)"
   echo "  work_dir=$WORK_DIR"
   echo
 
@@ -535,6 +639,7 @@ fi
 WAN="${WAN:-eth0}"
 LAN="${LAN:-eth1}"
 CAKE="${CAKE:-yes}"
+set_cake_profile_defaults
 AI_AGENT="${AI_AGENT:-yes}"
 MOBILE_ALERTS="${MOBILE_ALERTS:-no}"
 
@@ -603,6 +708,7 @@ echo "WAN:        $WAN"
 echo "LAN:        $LAN"
 echo "Gateway:    192.168.2.1"
 echo "DHCP:       192.168.2.100-192.168.2.200"
+echo "CAKE:       $CAKE_PROFILE ($CAKE_DOWN down / $CAKE_UP up)"
 echo "Work dir:   $WORK_DIR"
 echo "Logs:       $LOG_DIR"
 echo
@@ -636,7 +742,9 @@ run_logged "Installing packages, DNS/DHCP, firewall, CAKE and telemetry" "$LOG_D
   --prepare-only \
   --yes \
   --wan "$WAN" \
-  --lan "$LAN"
+  --lan "$LAN" \
+  --cake-down "$CAKE_DOWN" \
+  --cake-up "$CAKE_UP"
 
 PREP_WORK="$WORK_DIR/vm-live-prep"
 PREP_REPORT="$WORK_DIR/vm-live-prep-report.json"
