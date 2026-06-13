@@ -392,7 +392,7 @@ PY_CLEAN_RESULT
 
     NFT_CMD=nft
     nft_rules="$("$NFT_CMD" list ruleset 2>/dev/null || true)"
-    if printf "%s\n" "$nft_rules" | awk '/192[.]168[.]2[.]0[/]24/ && /masquerade/ {found=1} END{exit !found}'; then
+    if printf "%s\n" "$nft_rules" | awk -v net="$LAN_NET" 'index($0, net) && /masquerade/ {found=1} END{exit !found}'; then
       echo "  ✓ NAT masquerade"
     else
       echo "  ✗ NAT masquerade"

@@ -200,7 +200,7 @@ fi
 echo
 echo "Client expectation:"
 echo "  A device plugged into the LAN side should receive:"
-echo "    IP:      192.168.2.x"
+echo "    IP:      $DHCP_START-$DHCP_END"
 echo "    Gateway: $LAN_IP"
 echo "    DNS:     $LAN_IP"
 echo
