@@ -1,8 +1,14 @@
 # LilHouse Agentic Router
 
-LilHouse Agentic Router is an alpha-stage Debian router appliance installer and safety framework.
+Turn a fresh Debian machine with two wired NICs into a smart home router with one copy-paste install.
 
-It builds a small home-router stack around Pi-hole + Unbound DNS, nftables firewalling/NAT, CAKE/SQM traffic shaping, observe-only LilHouse telemetry workers, and a guarded install flow with backup, rollback guard, post-apply health checks, and readiness reporting.
+LilHouse Agentic Router is an alpha router appliance that installs Pi-hole, Unbound, nftables, CAKE/SQM, health checks, telemetry, and a guarded live apply flow.
+
+Start here:
+
+- [Fresh install guide](docs/FRESH-INSTALL.md)
+
+Alpha warning: test on a spare machine, disposable VM, or test router first.
 
 ## Current status
 
@@ -42,13 +48,13 @@ SSH from the WAN side is intentionally not enabled by default.
 
 ## Important warning
 
-Do **not** run the full throwaway VM installer on a real live router.
+This is alpha software. Test it first on a disposable VM, spare PC, or fresh Debian test router.
 
-The full install mode is for disposable VM testing only. Real-router mode is still dry-run / preview only until the live-production guardrails are completed.
+The installer changes network configuration, DNS, DHCP, firewall rules, NAT, and routing on the target machine.
 
-For Jordy's current live Pi router: use this repo as source/dev/test material only. Do not run the appliance installer or uninstaller on the live Pi.
+Do not run it on your current live router unless you are intentionally replacing that router and are prepared to recover or reinstall it.
 
-## Quick alpha VM test
+## Quick alpha install test
 
 On a disposable Debian VM:
 
