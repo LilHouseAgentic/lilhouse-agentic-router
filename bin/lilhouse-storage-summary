@@ -1,0 +1,442 @@
+#!/usr/bin/env python3
+import argparse
+import hashlib
+import json
+import os
+import sys
+from pathlib import Path
+from datetime import datetime, timezone
+
+DEFAULT_STATE_DIR = os.environ.get("LILHOUSE_STATE_DIR", "/var/lib/lilhouse")
+DEFAULT_LOG_DIR = os.environ.get("LILHOUSE_LOG_DIR", "/var/log/lilhouse")
+DEFAULT_ARCHIVE_DIR = os.environ.get("LILHOUSE_ARCHIVE_DIR", "/var/lib/lilhouse/archive")
+
+ACTIVE_LEDGERS = [
+    "events.jsonl",
+    "actions.jsonl",
+    "proposals.jsonl",
+]
+
+LATEST_STATE_FILES = [
+    "current-state.json",
+    "storage-health.json",
+]
+
+
+def now_dt():
+    return datetime.now(timezone.utc).astimezone()
+
+
+def now_iso():
+    return now_dt().isoformat()
+
+
+def human_bytes(num):
+    try:
+        num = float(num)
+    except Exception:
+        return "unknown"
+
+    units = ["B", "KB", "MB", "GB", "TB"]
+    for unit in units:
+        if abs(num) < 1024.0:
+            if unit == "B":
+                return f"{int(num)} {unit}"
+            return f"{num:.1f} {unit}"
+        num /= 1024.0
+    return f"{num:.1f} PB"
+
+
+def safe_stat(path):
+    p = Path(path)
+    try:
+        st = p.stat()
+        return {
+            "exists": True,
+            "bytes": st.st_size,
+            "human": human_bytes(st.st_size),
+            "mtime": datetime.fromtimestamp(st.st_mtime, timezone.utc).astimezone().isoformat(),
+        }
+    except Exception as exc:
+        return {
+            "exists": False,
+            "bytes": 0,
+            "human": "0 B",
+            "mtime": None,
+            "error": str(exc),
+        }
+
+
+def count_lines(path):
+    p = Path(path)
+    if not p.exists() or not p.is_file():
+        return 0
+    try:
+        with p.open("r", encoding="utf-8", errors="replace") as f:
+            return sum(1 for _ in f)
+    except Exception:
+        return None
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with Path(path).open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def file_kind(path):
+    name = Path(path).name
+    if name.endswith(".jsonl.gz"):
+        return "jsonl_gzip"
+    if name.endswith(".json.gz"):
+        return "json_gzip"
+    if name.endswith(".log.gz") or name.endswith(".txt.gz"):
+        return "text_gzip"
+    if name.endswith(".jsonl"):
+        return "jsonl"
+    if name.endswith(".json"):
+        return "json"
+    if name.endswith(".log") or name.endswith(".txt"):
+        return "text"
+    if name.endswith(".gz"):
+        return "gzip"
+    return "file"
+
+
+def walk_files(root, exclude_names=None):
+    root = Path(root)
+    exclude_names = set(exclude_names or [])
+    if not root.exists():
+        return
+    if root.is_file():
+        if root.name not in exclude_names:
+            yield root
+        return
+
+    for dirpath, dirs, files in os.walk(root, topdown=True):
+        base = Path(dirpath)
+        dirs[:] = [d for d in dirs if d not in {".git", "__pycache__"}]
+        for name in files:
+            if name in exclude_names:
+                continue
+            yield base / name
+
+
+def role_for_state_file(path, state_dir):
+    p = Path(path)
+    if p.name in ACTIVE_LEDGERS:
+        return "active_ledger"
+    if p.name in LATEST_STATE_FILES:
+        return "latest_state"
+    if p.name.endswith(".jsonl"):
+        return "jsonl_history"
+    if p.name.endswith(".json"):
+        return "report"
+    return "state_file"
+
+
+def summarize_file(path, role):
+    info = safe_stat(path)
+    kind = file_kind(path)
+    line_count = count_lines(path) if kind in {"jsonl", "text"} else None
+    return {
+        "path": str(path),
+        "role": role,
+        "kind": kind,
+        "bytes": info["bytes"],
+        "human": info["human"],
+        "mtime": info["mtime"],
+        "line_count": line_count,
+        "agent_access": "gzip_then_parse" if str(path).endswith(".gz") else "direct_read",
+    }
+
+
+def read_index_records(archive_dir):
+    index_file = Path(archive_dir) / "index.jsonl"
+    if not index_file.exists():
+        return []
+
+    records = []
+    with index_file.open("r", encoding="utf-8", errors="replace") as f:
+        for idx, line in enumerate(f, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                obj["_index_line"] = idx
+                records.append(obj)
+            except Exception as exc:
+                records.append({
+                    "schema": "invalid",
+                    "_index_line": idx,
+                    "error": str(exc),
+                })
+    return records
+
+
+def build_summary(args):
+    state_dir = Path(args.state_dir)
+    log_dir = Path(args.log_dir)
+    archive_dir = Path(args.archive_dir)
+
+    hot_files = []
+    log_files = []
+    archive_files = []
+
+    for p in walk_files(state_dir):
+        try:
+            p.relative_to(archive_dir)
+            continue
+        except Exception:
+            pass
+        if "archive" in p.parts or "archives" in p.parts:
+            continue
+        hot_files.append(summarize_file(p, role_for_state_file(p, state_dir)))
+
+    for p in walk_files(log_dir):
+        log_files.append(summarize_file(p, "hot_log"))
+
+    for p in walk_files(archive_dir, exclude_names={"index.jsonl"}):
+        archive_files.append(summarize_file(p, "archive_file"))
+
+    index_records = read_index_records(archive_dir)
+
+    active_ledgers = []
+    for name in ACTIVE_LEDGERS:
+        p = state_dir / name
+        info = safe_stat(p)
+        active_ledgers.append({
+            "name": name,
+            "path": str(p),
+            "exists": info["exists"],
+            "bytes": info["bytes"],
+            "human": info["human"],
+            "line_count": count_lines(p) if info["exists"] else 0,
+            "mtime": info["mtime"],
+        })
+
+    latest_state = []
+    for name in LATEST_STATE_FILES:
+        p = state_dir / name
+        info = safe_stat(p)
+        latest_state.append({
+            "name": name,
+            "path": str(p),
+            "exists": info["exists"],
+            "bytes": info["bytes"],
+            "human": info["human"],
+            "mtime": info["mtime"],
+        })
+
+    archive_actions = [r for r in index_records if r.get("schema") == "lilhouse.storage_archive_action.v1"]
+    index_file_records = [r for r in index_records if r.get("schema") == "lilhouse.storage_index_record.v1"]
+    summary_records = [r for r in index_records if r.get("role") == "storage_summary"]
+
+    verified_archive_actions = [
+        r for r in archive_actions
+        if r.get("verified_payload_sha256_match") is True
+    ]
+
+    hot_bytes = sum(f["bytes"] for f in hot_files)
+    log_bytes = sum(f["bytes"] for f in log_files)
+    archive_bytes = sum(f["bytes"] for f in archive_files)
+
+    report = {
+        "schema": "lilhouse.storage_summary.v1",
+        "ok": True,
+        "ts": now_iso(),
+        "mode": "dry_run" if args.dry_run else "write_summary",
+        "state_dir": str(state_dir),
+        "log_dir": str(log_dir),
+        "archive_dir": str(archive_dir),
+        "policy": {
+            "summary_is_additive": True,
+            "replaces_raw_history": False,
+            "deletes_files": False,
+            "truncates_ledgers": False,
+            "writes_summary_only_with_yes": True,
+        },
+        "writes_files": False,
+        "deletes_files": False,
+        "truncates_ledgers": False,
+        "active_ledgers": active_ledgers,
+        "latest_state": latest_state,
+        "totals": {
+            "hot_file_count": len(hot_files),
+            "hot_bytes": hot_bytes,
+            "hot_human": human_bytes(hot_bytes),
+            "log_file_count": len(log_files),
+            "log_bytes": log_bytes,
+            "log_human": human_bytes(log_bytes),
+            "archive_file_count": len(archive_files),
+            "archive_bytes": archive_bytes,
+            "archive_human": human_bytes(archive_bytes),
+            "archive_index_record_count": len(index_records),
+            "archive_action_count": len(archive_actions),
+            "verified_archive_action_count": len(verified_archive_actions),
+            "storage_index_record_count": len(index_file_records),
+            "prior_summary_record_count": len(summary_records),
+        },
+        "memory_map": {
+            "hot_files": hot_files[: args.max_records],
+            "log_files": log_files[: args.max_records],
+            "archive_files": archive_files[: args.max_records],
+            "archive_index_records_sample": index_records[: args.max_records],
+        },
+        "recommended_queries": [
+            "sudo lilhouse-storage-query --list",
+            "sudo lilhouse-storage-query --type ledger",
+            "sudo lilhouse-storage-query --type archive",
+            "sudo lilhouse-storage-query --path events --show --lines 40",
+            "sudo lilhouse-storage-query --type archive --path log --show --lines 40",
+        ],
+    }
+
+    return report
+
+
+def planned_summary_path(archive_dir):
+    stamp = now_dt().strftime("%Y%m%d-%H%M%S")
+    return Path(archive_dir) / "summaries" / f"storage-summary-{stamp}.json"
+
+
+def append_index_record(index_file, summary_path, sha256, bytes_count):
+    record = {
+        "schema": "lilhouse.storage_index_record.v1",
+        "indexed_at": now_iso(),
+        "path": str(summary_path),
+        "role": "storage_summary",
+        "kind": "json",
+        "bytes": bytes_count,
+        "human": human_bytes(bytes_count),
+        "sha256": sha256,
+        "compressed": False,
+        "agent_access": "direct_read",
+        "generated_by": "lilhouse-storage-summary",
+    }
+
+    index_file.parent.mkdir(parents=True, exist_ok=True)
+    with index_file.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, sort_keys=True) + "\n")
+
+    return record
+
+
+def write_summary(report, archive_dir):
+    summary_path = planned_summary_path(archive_dir)
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+
+    data = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    tmp = summary_path.with_suffix(summary_path.suffix + ".tmp")
+    tmp.write_text(data, encoding="utf-8")
+    tmp.replace(summary_path)
+
+    sha = sha256_file(summary_path)
+    bytes_count = summary_path.stat().st_size
+
+    index_record = append_index_record(Path(archive_dir) / "index.jsonl", summary_path, sha, bytes_count)
+
+    return {
+        "summary_path": str(summary_path),
+        "summary_bytes": bytes_count,
+        "summary_human": human_bytes(bytes_count),
+        "summary_sha256": sha,
+        "index_record_appended": True,
+        "index_record": index_record,
+    }
+
+
+def print_human(report, write_result=None):
+    print()
+    print("======================================")
+    print(" LilHouse Storage Summary")
+    print("======================================")
+    print()
+    print("Safety:")
+    print(f"  mode: {report['mode']}")
+    print(f"  writes files: {str(report.get('writes_files', False)).lower()}")
+    print("  deletes files: no")
+    print("  truncates ledgers: no")
+    print("  replaces raw history: no")
+    print()
+
+    totals = report["totals"]
+    print("Totals:")
+    print(f"  hot files:       {totals['hot_file_count']} ({totals['hot_human']})")
+    print(f"  log files:       {totals['log_file_count']} ({totals['log_human']})")
+    print(f"  archive files:   {totals['archive_file_count']} ({totals['archive_human']})")
+    print(f"  index records:   {totals['archive_index_record_count']}")
+    print(f"  archive actions: {totals['archive_action_count']}")
+    print(f"  verified actions:{totals['verified_archive_action_count']}")
+    print()
+
+    print("Active ledgers:")
+    for item in report["active_ledgers"]:
+        status = "present" if item["exists"] else "missing"
+        print(f"  - {item['name']}: {status}, lines={item['line_count']}, size={item['human']}")
+
+    print()
+    print("Recommended query path:")
+    for cmd in report["recommended_queries"]:
+        print(f"  {cmd}")
+
+    if write_result:
+        print()
+        print("Written:")
+        print(f"  summary: {write_result['summary_path']}")
+        print(f"  size:    {write_result['summary_human']}")
+        print(f"  sha256:  {write_result['summary_sha256']}")
+        print("  index:   appended")
+
+    print()
+    print("Status: OK")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Create a safe additive LilHouse storage memory summary.")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--write-summary", action="store_true")
+    ap.add_argument("--yes", action="store_true")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--state-dir", default=DEFAULT_STATE_DIR)
+    ap.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
+    ap.add_argument("--archive-dir", default=DEFAULT_ARCHIVE_DIR)
+    ap.add_argument("--max-records", type=int, default=50)
+    args = ap.parse_args()
+
+    if args.dry_run and args.write_summary:
+        print("ERROR: choose either --dry-run or --write-summary, not both.", file=sys.stderr)
+        return 2
+
+    if not args.dry_run and not args.write_summary:
+        print("ERROR: choose --dry-run or --write-summary --yes.", file=sys.stderr)
+        print("Try: sudo lilhouse-storage-summary --dry-run", file=sys.stderr)
+        return 2
+
+    if args.write_summary and not args.yes:
+        print("ERROR: refusing to write storage summary without --yes.", file=sys.stderr)
+        print("Try: sudo lilhouse-storage-summary --write-summary --yes", file=sys.stderr)
+        return 2
+
+    report = build_summary(args)
+
+    write_result = None
+    if args.write_summary:
+        report["writes_files"] = True
+        write_result = write_summary(report, Path(args.archive_dir))
+
+    if args.json:
+        out = dict(report)
+        out["write_result"] = write_result
+        print(json.dumps(out, indent=2, sort_keys=True))
+    else:
+        print_human(report, write_result)
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
