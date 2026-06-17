@@ -307,6 +307,10 @@ install -m 0755 "$REPO_DIR/bin/lilhouse-storage-query" "$(root_path /usr/local/b
 install -m 0755 "$REPO_DIR/bin/lilhouse-storage-summary" "$(root_path /usr/local/bin/lilhouse-storage-summary)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-storage-maintenance" "$(root_path /usr/local/bin/lilhouse-storage-maintenance)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-agent-readiness" "$(root_path /usr/local/bin/lilhouse-agent-readiness)"
+install -m 0644 "$REPO_DIR/config/lilhouse-agent-policy.example.json" "$(root_path /etc/lilhouse/agent-policy.example.json)"
+if [ ! -f "$(root_path /etc/lilhouse/agent-policy.json)" ]; then
+  install -m 0644 "$REPO_DIR/config/lilhouse-agent-policy.example.json" "$(root_path /etc/lilhouse/agent-policy.json)"
+fi
 install -m 0755 "$REPO_DIR/bin/lilhouse-interface-report" "$(root_path /usr/local/bin/lilhouse-interface-report)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-plan" "$(root_path /usr/local/bin/lilhouse-router-plan)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-plan-summary" "$(root_path /usr/local/bin/lilhouse-router-plan-summary)"
