@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+from datetime import datetime, timezone
+
+DEFAULT_STATE_DIR = os.environ.get("LILHOUSE_STATE_DIR", "/var/lib/lilhouse")
+DEFAULT_LOG_DIR = os.environ.get("LILHOUSE_LOG_DIR", "/var/log/lilhouse")
+DEFAULT_RUNTIME_DIR = os.environ.get("LILHOUSE_RUNTIME_DIR", "/run/lilhouse")
+DEFAULT_CONFIG_DIR = os.environ.get("LILHOUSE_CONFIG_DIR", "/etc/lilhouse")
+
+
+def human_bytes(num):
+    try:
+        num = float(num)
+    except Exception:
+        return "unknown"
+
+    units = ["B", "KB", "MB", "GB", "TB"]
+    for unit in units:
+        if abs(num) < 1024.0:
+            if unit == "B":
+                return f"{int(num)} {unit}"
+            return f"{num:.1f} {unit}"
+        num /= 1024.0
+    return f"{num:.1f} PB"
+
+
+def safe_stat_size(path):
+    try:
+        return path.stat().st_size
+    except Exception:
+        return 0
+
+
+def scan_path(path):
+    p = Path(path)
+    result = {
+        "path": str(p),
+        "exists": p.exists(),
+        "files": 0,
+        "dirs": 0,
+        "bytes": 0,
+        "jsonl_files": 0,
+        "json_files": 0,
+        "gz_files": 0,
+        "errors": [],
+    }
+
+    if not p.exists():
+        return result
+
+    if p.is_file():
+        result["files"] = 1
+        result["bytes"] = safe_stat_size(p)
+        name = p.name
+        result["jsonl_files"] = 1 if name.endswith(".jsonl") else 0
+        result["json_files"] = 1 if name.endswith(".json") else 0
+        result["gz_files"] = 1 if name.endswith(".gz") else 0
+        return result
+
+    for root, dirs, files in os.walk(p, topdown=True):
+        root_path = Path(root)
+
+        # Keep scan scoped and avoid surprising pseudo filesystems if a user points at /.
+        dirs[:] = [d for d in dirs if d not in {".git", "__pycache__"}]
+
+        result["dirs"] += len(dirs)
+
+        for name in files:
+            fp = root_path / name
+            result["files"] += 1
+            result["bytes"] += safe_stat_size(fp)
+            if name.endswith(".jsonl"):
+                result["jsonl_files"] += 1
+            if name.endswith(".json"):
+                result["json_files"] += 1
+            if name.endswith(".gz"):
+                result["gz_files"] += 1
+
+    return result
+
+
+def count_lines(path):
+    p = Path(path)
+    if not p.exists() or not p.is_file():
+        return 0
+    try:
+        with p.open("r", encoding="utf-8", errors="replace") as f:
+            return sum(1 for _ in f)
+    except Exception:
+        return 0
+
+
+def ledger_summary(state_dir):
+    base = Path(state_dir)
+    ledgers = {}
+    for name in ["events.jsonl", "actions.jsonl", "proposals.jsonl"]:
+        p = base / name
+        ledgers[name] = {
+            "path": str(p),
+            "exists": p.exists(),
+            "bytes": safe_stat_size(p),
+            "lines": count_lines(p),
+        }
+    return ledgers
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Show LilHouse-owned storage usage without deleting anything.")
+    ap.add_argument("--state-dir", default=DEFAULT_STATE_DIR)
+    ap.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
+    ap.add_argument("--runtime-dir", default=DEFAULT_RUNTIME_DIR)
+    ap.add_argument("--config-dir", default=DEFAULT_CONFIG_DIR)
+    ap.add_argument("--json", action="store_true")
+    args = ap.parse_args()
+
+    paths = {
+        "state": scan_path(args.state_dir),
+        "logs": scan_path(args.log_dir),
+        "runtime": scan_path(args.runtime_dir),
+        "config": scan_path(args.config_dir),
+    }
+
+    total_bytes = sum(item["bytes"] for item in paths.values())
+
+    report = {
+        "schema": "lilhouse.storage_status.v1",
+        "ok": True,
+        "ts": datetime.now(timezone.utc).astimezone().isoformat(),
+        "policy": {
+            "mode": "lossless_by_default",
+            "cleanup_enabled": False,
+            "raw_history_must_remain_accessible": True,
+            "summaries_are_additive": True,
+        },
+        "paths": paths,
+        "ledgers": ledger_summary(args.state_dir),
+        "summary": {
+            "tracked_bytes": total_bytes,
+            "tracked_human": human_bytes(total_bytes),
+            "cleanup_action": "none_read_only_status",
+        },
+    }
+
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0
+
+    print()
+    print("======================================")
+    print(" LilHouse Storage Status")
+    print("======================================")
+    print()
+    print("Policy:")
+    print("  mode: lossless by default")
+    print("  cleanup: disabled in this command")
+    print("  raw history: must remain accessible")
+    print()
+    print("Tracked paths:")
+    for label, info in paths.items():
+        status = "present" if info["exists"] else "missing"
+        print(f"  {label:<8} {status:<8} {human_bytes(info['bytes']):>10}  {info['path']}")
+    print()
+    print("Ledgers:")
+    for name, info in report["ledgers"].items():
+        print(f"  {name:<15} lines={info['lines']:<8} size={human_bytes(info['bytes'])}")
+    print()
+    print(f"Total tracked LilHouse usage: {human_bytes(total_bytes)}")
+    print()
+    print("Status: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

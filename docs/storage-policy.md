@@ -1,0 +1,68 @@
+# LilHouse lossless storage policy
+
+LilHouse is intended to run continuously on small router-class systems without creating unbounded storage growth.
+
+The storage policy is lossless by default:
+
+- Worker observations should remain available from time of installation onward.
+- Raw history may be compressed, archived, indexed, and summarized.
+- Summaries are additive and must not become the only copy of important worker observations.
+- Cleanup must never silently remove the only copy of useful historical worker data.
+- Latest state files must remain plain and easy for humans/tools to read.
+- Old raw history should move from hot storage to compressed warm/cold storage.
+
+## Storage tiers
+
+### Hot data
+
+Hot data is immediately useful and should stay uncompressed:
+
+- latest current-state JSON
+- latest storage-health JSON
+- recent event/action/proposal ledgers
+- recent failure reports
+- active config files
+- current router.env and cake.env
+
+### Warm data
+
+Warm data may be compressed but should remain directly recoverable:
+
+- older JSONL ledgers
+- older worker reports
+- older successful run reports
+- daily archives
+
+### Cold data
+
+Cold data is compact history used by agents for long-term reasoning:
+
+- daily summaries
+- indexes pointing to compressed raw archives
+- weekly/monthly trend summaries
+
+Cold summaries must not replace raw archives unless the data is explicitly marked disposable.
+
+## Default cleanup behaviour
+
+Cleanup tools must be conservative:
+
+- dry-run first
+- only manage LilHouse-owned paths
+- preserve latest state
+- preserve config
+- preserve failure reports
+- preserve indexed history
+- compress before deleting raw text where practical
+- never clean arbitrary system logs or user files
+
+## Agent access requirement
+
+Agents must be able to inspect history from install time onward by using:
+
+1. latest plain JSON state
+2. compact summaries
+3. indexes
+4. compressed raw archives when deeper detail is needed
+
+The goal is low storage growth without blinding the agents.
