@@ -119,8 +119,9 @@ Useful commands:
     sudo lilhouse-storage-ledger-checkpoint --dry-run
     sudo lilhouse-storage-query --list
     sudo lilhouse-storage-query --path events --show --lines 40
+    sudo lilhouse-storage-summary --dry-run
 
-Current alpha archive execution is intentionally narrow. It only compresses/copies logs and old JSON reports. It does not delete originals, truncate active ledgers, archive active ledgers, modify config, or clean arbitrary system files. Ledger checkpointing is dry-run planning only. Read-only storage query can inspect hot and indexed history. Query preview is read-only and line-limited.
+Current alpha archive execution is intentionally narrow. It only compresses/copies logs and old JSON reports. It does not delete originals, truncate active ledgers, archive active ledgers, modify config, or clean arbitrary system files. Ledger checkpointing is dry-run planning only. Read-only storage query can inspect hot and indexed history. Query preview is read-only and line-limited. Storage summaries are additive memory maps and do not replace raw history.
 
 The goal is to keep router telemetry useful for agents over time without letting storage growth become a hidden problem.
 

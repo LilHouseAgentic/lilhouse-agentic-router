@@ -172,3 +172,17 @@ Examples:
     sudo lilhouse-storage-query --type archive --path query-worker --show --lines 40
 
 Preview mode is read-only and line-limited.
+
+## Storage summary
+
+`lilhouse-storage-summary` creates an additive memory-map summary of hot storage, archive files, active ledgers, and archive index records.
+
+Dry-run mode writes nothing:
+
+    sudo lilhouse-storage-summary --dry-run
+
+Summary write mode requires an explicit confirmation:
+
+    sudo lilhouse-storage-summary --write-summary --yes
+
+Written summaries are JSON files under the archive directory and are also indexed for later lookup. Summaries never replace raw history, delete files, or truncate ledgers.
