@@ -411,6 +411,7 @@ PY_CLEAN_RESULT
     echo "It should receive an address in $LAN_NET with gateway/DNS $LAN_IP."
     echo
     echo "Later, check router health with: sudo lilhouse-router-status"
+    echo "Check LilHouse storage usage with: sudo lilhouse-storage-status"
     echo "To change CAKE speeds later: sudo lilhouse-cake-set --down 250 --up 35"
   fi
 
