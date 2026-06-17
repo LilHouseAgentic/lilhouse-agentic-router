@@ -138,3 +138,11 @@ Execute:
     sudo lilhouse-storage-archive --execute --yes
 
 This command is a compression/archive primitive, not a cleanup/deletion tool.
+
+## Active ledger checkpoint dry-run
+
+`lilhouse-storage-ledger-checkpoint --dry-run` plans how active JSONL ledgers could be archived later.
+
+It does not write archives, append index records, truncate ledgers, delete files, or modify active history.
+
+The dry-run plan shows the archive target, source SHA256, line count, byte size, and the exact safety order required before a future checkpoint execution can exist.
