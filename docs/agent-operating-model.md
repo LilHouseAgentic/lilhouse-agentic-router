@@ -31,3 +31,13 @@ summary -> query -> show raw evidence
 ## Forbidden for agents
 
 Agents must not delete arbitrary files, truncate active ledgers, clear archive indexes, overwrite raw history, disable firewall without rollback, change DHCP/NAT/firewall live without guarded approval, or run live deployment without the required operator phrase.
+
+## Agent-readable status
+
+Future agents should start with the compact read-only status report:
+
+```bash
+lilhouse-agent-status --json
+```
+
+This combines agent readiness, policy source, storage status, storage maintenance planning, and router status into one machine-readable report.

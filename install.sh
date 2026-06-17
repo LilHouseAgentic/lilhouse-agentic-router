@@ -234,6 +234,7 @@ backup_existing /usr/local/bin/lilhouse-storage-query
 backup_existing /usr/local/bin/lilhouse-storage-summary
 backup_existing /usr/local/bin/lilhouse-storage-maintenance
 backup_existing /usr/local/bin/lilhouse-agent-readiness
+backup_existing /usr/local/bin/lilhouse-agent-status
 backup_existing /usr/local/bin/lilhouse-interface-report
 backup_existing /usr/local/bin/lilhouse-router-plan
 backup_existing /usr/local/bin/lilhouse-router-plan-summary
@@ -394,6 +395,7 @@ echo "  sudo lilhouse-storage-query --list"
 echo "  sudo lilhouse-storage-summary --dry-run"
 echo "  sudo lilhouse-storage-maintenance --dry-run"
 echo "  lilhouse-agent-readiness --check"
+echo "  lilhouse-agent-status --json"
 echo "  lilhouse-router-status"
 echo "  sudo lilhouse-cake-set --down 250 --up 35"
 echo "  systemctl status lilhouse-current-state.timer --no-pager"
