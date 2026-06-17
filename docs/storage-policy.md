@@ -159,3 +159,16 @@ Examples:
     sudo lilhouse-storage-query --type ledger
     sudo lilhouse-storage-query --type archive
     sudo lilhouse-storage-query --path events
+
+## Storage query preview
+
+`lilhouse-storage-query --show` previews matching text or gzip records without extracting archives or writing temporary files.
+
+It requires `--path` so a broad query does not accidentally dump too much history.
+
+Examples:
+
+    sudo lilhouse-storage-query --path events --show --lines 40
+    sudo lilhouse-storage-query --type archive --path query-worker --show --lines 40
+
+Preview mode is read-only and line-limited.

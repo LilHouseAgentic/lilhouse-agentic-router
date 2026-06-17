@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import gzip
 import json
 import os
 from pathlib import Path
@@ -339,6 +340,123 @@ def apply_filters(records, args):
     return out
 
 
+
+def path_is_under(path, roots):
+    try:
+        rp = Path(path).resolve()
+    except Exception:
+        return False
+
+    for root in roots:
+        try:
+            rr = Path(root).resolve()
+            rp.relative_to(rr)
+            return True
+        except Exception:
+            pass
+
+    return False
+
+
+def choose_read_path(record, args):
+    roots = [
+        Path(args.state_dir),
+        Path(args.log_dir),
+        Path(args.archive_dir),
+    ]
+
+    candidates = []
+
+    # Prefer archive payloads when the record points to both source and archive.
+    for key in ["archive_path", "path", "source_path"]:
+        value = record.get(key)
+        if value:
+            candidates.append(value)
+
+    for value in candidates:
+        path = Path(value)
+        if path.exists() and path.is_file() and path_is_under(path, roots):
+            return path
+
+    return None
+
+
+def read_text_preview(path, max_lines, max_line_chars):
+    path = Path(path)
+    gzip_mode = path.name.endswith(".gz")
+
+    opener = gzip.open if gzip_mode else open
+    lines = []
+    truncated = False
+
+    try:
+        with opener(path, "rt", encoding="utf-8", errors="replace") as f:
+            for idx, line in enumerate(f, start=1):
+                if idx > max_lines:
+                    truncated = True
+                    break
+                line = line.rstrip("\n")
+                if len(line) > max_line_chars:
+                    line = line[:max_line_chars] + "…"
+                lines.append(line)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "path": str(path),
+            "gzip": gzip_mode,
+            "error": str(exc),
+            "lines": [],
+            "truncated": False,
+        }
+
+    return {
+        "ok": True,
+        "path": str(path),
+        "gzip": gzip_mode,
+        "lines": lines,
+        "line_count_shown": len(lines),
+        "truncated": truncated,
+    }
+
+
+def build_show_results(records, args):
+    show_results = []
+
+    for record in records:
+        path = choose_read_path(record, args)
+        if not path:
+            show_results.append({
+                "ok": False,
+                "record_path": record.get("path") or record.get("archive_path") or record.get("source_path"),
+                "role": record.get("role"),
+                "source": record.get("source"),
+                "error": "no readable file under allowed LilHouse roots",
+            })
+            continue
+
+        kind = record.get("kind", file_kind(path))
+        if kind not in {"json", "jsonl", "text", "json_gzip", "jsonl_gzip", "text_gzip", "gzip"}:
+            show_results.append({
+                "ok": False,
+                "path": str(path),
+                "role": record.get("role"),
+                "source": record.get("source"),
+                "kind": kind,
+                "error": "record kind is not treated as text-previewable",
+            })
+            continue
+
+        result = read_text_preview(path, args.lines, args.max_line_chars)
+        result.update({
+            "role": record.get("role"),
+            "source": record.get("source"),
+            "kind": kind,
+            "agent_access": record.get("agent_access"),
+        })
+        show_results.append(result)
+
+    return show_results
+
 def print_human(report):
     print()
     print("======================================")
@@ -349,6 +467,8 @@ def print_human(report):
     print(f"Type filter: {report['filters']['type']}")
     print(f"Path filter: {report['filters']['path'] or 'none'}")
     print(f"Results: {report['result_count']} shown of {report['total_matches']} matches")
+    if report.get("show", {}).get("enabled"):
+        print(f"Show: enabled, max lines per file: {report['show']['lines']}")
     print()
 
     if not report["records"]:
@@ -370,9 +490,30 @@ def print_human(report):
             print(f"  verified_payload: {rec.get('verified_payload_sha256_match')}")
         if rec.get("deleted_source") is not None:
             print(f"  deleted_source:   {rec.get('deleted_source')}")
+
+    if report.get("show", {}).get("enabled"):
+        print()
+        print("======================================")
+        print(" Preview")
+        print("======================================")
+
+        for item in report.get("show_results", []):
+            print()
+            label = item.get("path") or item.get("record_path") or "unknown"
+            print(f"--- {label} [{item.get('role', 'unknown')}/{item.get('source', 'unknown')}] ---")
+
+            if not item.get("ok"):
+                print(f"ERROR: {item.get('error', 'unavailable')}")
+                continue
+
+            for idx, line in enumerate(item.get("lines", []), start=1):
+                print(f"{idx:04d}: {line}")
+
+            if item.get("truncated"):
+                print("... truncated by --lines limit ...")
+
     print()
     print("Status: OK")
-
 
 def main():
     ap = argparse.ArgumentParser(description="Read-only query over LilHouse hot storage and archive indexes.")
@@ -381,6 +522,9 @@ def main():
     ap.add_argument("--type", default="all", choices=["all", "hot", "ledger", "archive", "report", "log", "index"])
     ap.add_argument("--path", default="")
     ap.add_argument("--limit", type=int, default=50)
+    ap.add_argument("--show", action="store_true", help="Preview matching text/gzip records read-only. Requires --path.")
+    ap.add_argument("--lines", type=int, default=80, help="Maximum preview lines per matching record when --show is used.")
+    ap.add_argument("--max-line-chars", type=int, default=2000, help="Maximum characters per preview line.")
     ap.add_argument("--state-dir", default=DEFAULT_STATE_DIR)
     ap.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
     ap.add_argument("--archive-dir", default=DEFAULT_ARCHIVE_DIR)
@@ -389,6 +533,14 @@ def main():
     all_records = collect_records(args)
     matches = apply_filters(all_records, args)
     shown = matches[: max(0, args.limit)]
+
+    show_results = []
+    if args.show:
+        if not args.path:
+            print("ERROR: --show requires --path to avoid dumping too much history.")
+            print("Try: sudo lilhouse-storage-query --path events --show --lines 40")
+            return 2
+        show_results = build_show_results(shown, args)
 
     report = {
         "schema": "lilhouse.storage_query.v1",
@@ -409,6 +561,13 @@ def main():
         "total_matches": len(matches),
         "result_count": len(shown),
         "records": shown,
+        "show": {
+            "enabled": bool(args.show),
+            "lines": args.lines,
+            "max_line_chars": args.max_line_chars,
+            "requires_path_filter": True,
+        },
+        "show_results": show_results,
     }
 
     if args.json:
