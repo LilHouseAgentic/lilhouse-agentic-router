@@ -1,0 +1,240 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from datetime import datetime, timezone
+
+def now_iso():
+    return datetime.now(timezone.utc).astimezone().isoformat()
+
+def command_path(name):
+    sibling = Path(__file__).resolve().parent / name
+    if sibling.exists() and os.access(sibling, os.X_OK):
+        return str(sibling), "sibling_bin"
+    found = shutil.which(name)
+    if found:
+        return found, "path"
+    return None, None
+
+def parse_json_stdout(text):
+    try:
+        return json.loads(text), None
+    except Exception as e:
+        return None, str(e)
+
+def run_stage(stage, command, expect_json=False, timeout=20):
+    started = now_iso()
+    try:
+        proc = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+        stdout = proc.stdout or ""
+        stderr = proc.stderr or ""
+        parsed = None
+        json_error = None
+        json_ok = False
+        if expect_json:
+            parsed, json_error = parse_json_stdout(stdout)
+            json_ok = parsed is not None
+        return {
+            "stage": stage,
+            "command": command,
+            "ok": proc.returncode == 0 and (json_ok if expect_json else True),
+            "returncode": proc.returncode,
+            "started_at": started,
+            "finished_at": now_iso(),
+            "json_ok": json_ok,
+            "json_error": json_error,
+            "json": parsed,
+            "stdout_excerpt": stdout[:3000],
+            "stderr_excerpt": stderr[:1200],
+        }
+    except subprocess.TimeoutExpired as e:
+        return {
+            "stage": stage,
+            "command": command,
+            "ok": False,
+            "returncode": None,
+            "started_at": started,
+            "finished_at": now_iso(),
+            "json_ok": False,
+            "json_error": "timeout",
+            "json": None,
+            "stdout_excerpt": str(e.stdout or "")[:3000],
+            "stderr_excerpt": str(e.stderr or "")[:1200],
+        }
+    except Exception as e:
+        return {
+            "stage": stage,
+            "command": command,
+            "ok": False,
+            "returncode": None,
+            "started_at": started,
+            "finished_at": now_iso(),
+            "json_ok": False,
+            "json_error": str(e),
+            "json": None,
+            "stdout_excerpt": "",
+            "stderr_excerpt": str(e),
+        }
+
+def missing_stage(stage, name):
+    return {
+        "stage": stage,
+        "command": [name],
+        "ok": False,
+        "returncode": None,
+        "started_at": now_iso(),
+        "finished_at": now_iso(),
+        "json_ok": False,
+        "json_error": "command not found",
+        "json": None,
+        "stdout_excerpt": "",
+        "stderr_excerpt": "command not found: " + name,
+    }
+
+def status_from_text(text):
+    for line in reversed(text.splitlines()):
+        clean = line.strip()
+        if clean.startswith("Status:"):
+            return clean.split(":", 1)[1].strip()
+    return "unknown"
+
+def bool_from_json(stage, key="ok"):
+    data = stage.get("json") or {}
+    return data.get(key)
+
+def build_report(args):
+    stages = []
+
+    readiness_cmd, readiness_source = command_path("lilhouse-agent-readiness")
+    if readiness_cmd:
+        stages.append(run_stage("agent_readiness", [readiness_cmd, "--check", "--json"], True, args.timeout))
+    else:
+        stages.append(missing_stage("agent_readiness", "lilhouse-agent-readiness"))
+
+    storage_status_cmd, storage_status_source = command_path("lilhouse-storage-status")
+    if storage_status_cmd:
+        stages.append(run_stage("storage_status", [storage_status_cmd, "--json"], True, args.timeout))
+    else:
+        stages.append(missing_stage("storage_status", "lilhouse-storage-status"))
+
+    maintenance_cmd, maintenance_source = command_path("lilhouse-storage-maintenance")
+    if maintenance_cmd:
+        stages.append(run_stage("storage_maintenance", [maintenance_cmd, "--dry-run", "--json"], True, args.timeout))
+    else:
+        stages.append(missing_stage("storage_maintenance", "lilhouse-storage-maintenance"))
+
+    if args.skip_router:
+        stages.append({
+            "stage": "router_status",
+            "command": ["lilhouse-router-status"],
+            "ok": True,
+            "returncode": 0,
+            "started_at": now_iso(),
+            "finished_at": now_iso(),
+            "json_ok": False,
+            "json_error": None,
+            "json": None,
+            "stdout_excerpt": "skipped by --skip-router",
+            "stderr_excerpt": "",
+            "skipped": True,
+        })
+    else:
+        router_cmd, router_source = command_path("lilhouse-router-status")
+        if router_cmd:
+            stages.append(run_stage("router_status", [router_cmd], False, args.timeout))
+        else:
+            stages.append(missing_stage("router_status", "lilhouse-router-status"))
+
+    by_name = {stage["stage"]: stage for stage in stages}
+    readiness_json = by_name["agent_readiness"].get("json") or {}
+    storage_json = by_name["storage_status"].get("json") or {}
+    maintenance_json = by_name["storage_maintenance"].get("json") or {}
+    router_stage = by_name["router_status"]
+
+    router_status = "skipped" if router_stage.get("skipped") else status_from_text(router_stage.get("stdout_excerpt", ""))
+
+    summary = {
+        "agent_readiness_ok": readiness_json.get("ok") is True,
+        "policy_source": readiness_json.get("policy_source"),
+        "policy_valid": readiness_json.get("policy_valid"),
+        "default_mode": readiness_json.get("default_mode"),
+        "missing_tools_count": readiness_json.get("missing_tools_count"),
+        "storage_status_ok": storage_json.get("ok") is True,
+        "storage_tracked_human": (storage_json.get("summary") or {}).get("tracked_human"),
+        "storage_maintenance_ok": maintenance_json.get("ok") is True,
+        "router_status_ok": router_stage.get("ok") is True,
+        "router_status": router_status,
+    }
+
+    ok = all(stage.get("ok") for stage in stages)
+    report = {
+        "schema": "lilhouse.agent_status.v1",
+        "ok": ok,
+        "ts": now_iso(),
+        "mode": "read_only_agent_status",
+        "writes_files": False,
+        "deletes_files": False,
+        "executes_router_changes": False,
+        "summary": summary,
+        "safe_next_commands": [
+            "lilhouse-agent-readiness --check",
+            "sudo lilhouse-storage-maintenance --dry-run",
+            "sudo lilhouse-storage-summary --dry-run",
+            "sudo lilhouse-storage-query --path <term> --show --lines 40",
+            "sudo lilhouse-router-status",
+        ],
+        "stages": stages,
+    }
+    return report
+
+def print_human(report):
+    s = report["summary"]
+    print()
+    print("======================================")
+    print(" LilHouse Agent Status")
+    print("======================================")
+    print()
+    print("Safety:")
+    print("  mode: read-only agent status")
+    print("  writes files: no")
+    print("  deletes files: no")
+    print("  executes router changes: no")
+    print()
+    print("Agent readiness: " + ("OK" if s.get("agent_readiness_ok") else "CHECK"))
+    print("  policy source: " + str(s.get("policy_source")))
+    print("  policy valid:  " + str(s.get("policy_valid")))
+    print("  default mode:  " + str(s.get("default_mode")))
+    print("  missing tools: " + str(s.get("missing_tools_count")))
+    print()
+    print("Storage: " + ("OK" if s.get("storage_status_ok") else "CHECK"))
+    print("  tracked usage: " + str(s.get("storage_tracked_human")))
+    print("  maintenance:   " + ("OK" if s.get("storage_maintenance_ok") else "CHECK"))
+    print()
+    print("Router: " + ("OK" if s.get("router_status_ok") else "CHECK"))
+    print("  status: " + str(s.get("router_status")))
+    print()
+    print("Safe next commands:")
+    for cmd in report["safe_next_commands"]:
+        print("  - " + cmd)
+    print()
+    print("Overall status: " + ("OK" if report["ok"] else "CHECK REQUIRED"))
+
+def main():
+    ap = argparse.ArgumentParser(description="Show one compact read-only status report for future LilHouse agents.")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--skip-router", action="store_true", help="Skip router-status stage for repo/dev tests.")
+    ap.add_argument("--timeout", type=int, default=20)
+    args = ap.parse_args()
+    report = build_report(args)
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print_human(report)
+    return 0 if report["ok"] else 1
+
+if __name__ == "__main__":
+    raise SystemExit(main())
