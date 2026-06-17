@@ -1,0 +1,82 @@
+{
+  "schema": "lilhouse.agent_policy.v1",
+  "version": "0.5.0-alpha",
+  "default_mode": "read_only_observe",
+  "purpose": "Define the safety contract future LilHouse agents must follow.",
+  "principles": [
+    "Observe before proposing.",
+    "Read state, summaries, indexes, and raw evidence before deciding.",
+    "Summaries are hints, not replacements for raw evidence.",
+    "Execution must go through guarded commands only.",
+    "Router-impacting changes require explicit operator approval.",
+    "Storage history must remain accessible from install time onward."
+  ],
+  "agent_workflow": [
+    "Run read-only status checks.",
+    "Read the storage maintenance dry-run report.",
+    "Read additive storage summaries when available.",
+    "Query hot and archived history for relevant evidence.",
+    "Preview raw evidence with bounded line limits.",
+    "Classify as observe, watch, propose, alert, guarded_execute_request, or blocked.",
+    "Execute only through guarded commands after required approval."
+  ],
+  "storage_rules": {
+    "raw_history_preserved": true,
+    "summaries_are_additive": true,
+    "summaries_replace_raw_history": false,
+    "agent_may_delete_history": false,
+    "agent_may_truncate_ledgers": false,
+    "agent_may_preview_history_with_line_limits": true
+  },
+  "decision_classes": {
+    "observe": "No action. Report status only.",
+    "watch": "Continue monitoring and re-check later.",
+    "propose": "Suggest a change but do not execute.",
+    "alert": "Notify the operator about a significant issue.",
+    "guarded_execute_request": "Ask for explicit approval to run a guarded command.",
+    "blocked": "Refuse unsafe or unsupported action."
+  },
+  "command_tiers": {
+    "observe_read_only": [
+      "lilhouse-current-state",
+      "lilhouse-status",
+      "lilhouse-router-status",
+      "lilhouse-storage-status",
+      "lilhouse-storage-maintenance --dry-run",
+      "lilhouse-storage-summary --dry-run",
+      "lilhouse-storage-query --path <term> --show --lines <n>"
+    ],
+    "additive_write_requires_yes": [
+      "lilhouse-storage-index --write-index --yes",
+      "lilhouse-storage-summary --write-summary --yes"
+    ],
+    "guarded_execute_requires_operator": [
+      "lilhouse-storage-archive --execute --yes",
+      "lilhouse-cake-set --down <mbit> --up <mbit>",
+      "guarded live deploy commands"
+    ],
+    "forbidden_for_agents": [
+      "delete arbitrary files",
+      "truncate active ledgers",
+      "clear archive indexes",
+      "overwrite raw history",
+      "disable firewall without rollback",
+      "change DHCP/NAT/firewall live without guarded approval",
+      "run live router deployment without the exact operator phrase",
+      "target production root without explicit live-root allowance"
+    ]
+  },
+  "required_readiness_tools": [
+    "lilhouse-current-state",
+    "lilhouse-status",
+    "lilhouse-router-status",
+    "lilhouse-storage-status",
+    "lilhouse-storage-clean",
+    "lilhouse-storage-index",
+    "lilhouse-storage-archive",
+    "lilhouse-storage-ledger-checkpoint",
+    "lilhouse-storage-query",
+    "lilhouse-storage-summary",
+    "lilhouse-storage-maintenance"
+  ]
+}
