@@ -108,3 +108,33 @@ Writing the index is guarded:
     sudo lilhouse-storage-index --write-index --yes
 
 The index itself is stored under the LilHouse archive directory and must not replace raw archives.
+
+## Guarded archive execution
+
+`lilhouse-storage-archive` performs the first guarded archive execution path.
+
+The first execution scope is intentionally narrow:
+
+- compress/copy logs
+- compress/copy old JSON reports
+- verify compressed archive payload SHA256
+- append archive action records to the archive index
+- preserve original source files
+
+It does not:
+
+- delete originals
+- truncate active ledgers
+- archive active ledgers
+- modify config
+- clean arbitrary system files
+
+Preview:
+
+    sudo lilhouse-storage-archive --dry-run
+
+Execute:
+
+    sudo lilhouse-storage-archive --execute --yes
+
+This command is a compression/archive primitive, not a cleanup/deletion tool.
