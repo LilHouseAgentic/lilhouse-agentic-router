@@ -66,3 +66,17 @@ Agents must be able to inspect history from install time onward by using:
 4. compressed raw archives when deeper detail is needed
 
 The goal is low storage growth without blinding the agents.
+
+## Archive dry-run planning
+
+`lilhouse-storage-clean --dry-run` plans storage actions without changing files.
+
+The first alpha implementation is intentionally read-only:
+
+- it does not delete files
+- it does not truncate active ledgers
+- it does not compress files yet
+- it reports what would be compressed or archived later
+- it preserves active state, active config, and live ledgers
+
+Future archive execution must preserve agent access to old worker observations by writing compressed archives and indexes before any live ledger checkpointing occurs.
