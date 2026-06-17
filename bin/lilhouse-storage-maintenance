@@ -1,0 +1,335 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from datetime import datetime, timezone
+
+DEFAULT_STATE_DIR = os.environ.get("LILHOUSE_STATE_DIR", "/var/lib/lilhouse")
+DEFAULT_LOG_DIR = os.environ.get("LILHOUSE_LOG_DIR", "/var/log/lilhouse")
+DEFAULT_ARCHIVE_DIR = os.environ.get("LILHOUSE_ARCHIVE_DIR", "/var/lib/lilhouse/archive")
+
+
+def now_iso():
+    return datetime.now(timezone.utc).astimezone().isoformat()
+
+
+def tool_path(name):
+    sibling = Path(__file__).resolve().parent / name
+    if sibling.exists() and os.access(sibling, os.X_OK):
+        return str(sibling)
+    return name
+
+
+def strip_dir_args(argv):
+    out = []
+    skip_next = False
+    dir_flags = {
+        "--state-dir",
+        "--log-dir",
+        "--archive-dir",
+        "--runtime-dir",
+        "--config-dir",
+    }
+
+    for item in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if item in dir_flags:
+            skip_next = True
+            continue
+        out.append(item)
+
+    return out
+
+
+def run_stage(stage, command, allow_retry_without_dir_args=True, excerpt_chars=6000):
+    started = now_iso()
+
+    proc = subprocess.run(
+        command,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    retried_without_dir_args = False
+
+    if (
+        proc.returncode != 0
+        and allow_retry_without_dir_args
+        and "unrecognized arguments" in (proc.stderr or "")
+    ):
+        retried_without_dir_args = True
+        retry_command = strip_dir_args(command)
+        proc = subprocess.run(
+            retry_command,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        command = retry_command
+
+    parsed_json = None
+    json_ok = False
+    json_error = None
+
+    stdout = proc.stdout or ""
+    stderr = proc.stderr or ""
+
+    if stdout.strip():
+        try:
+            parsed_json = json.loads(stdout)
+            json_ok = True
+        except Exception as exc:
+            json_error = str(exc)
+
+    result = {
+        "stage": stage,
+        "started_at": started,
+        "finished_at": now_iso(),
+        "command": command,
+        "returncode": proc.returncode,
+        "ok": proc.returncode == 0,
+        "json_ok": json_ok,
+        "json_error": json_error,
+        "retried_without_dir_args": retried_without_dir_args,
+        "stdout_excerpt": stdout[:excerpt_chars],
+        "stderr_excerpt": stderr[:excerpt_chars],
+    }
+
+    if parsed_json is not None:
+        result["json"] = parsed_json
+
+    return result
+
+
+def stage_specs(args):
+    state_dir = str(Path(args.state_dir))
+    log_dir = str(Path(args.log_dir))
+    archive_dir = str(Path(args.archive_dir))
+
+    common_dirs = [
+        "--state-dir", state_dir,
+        "--log-dir", log_dir,
+        "--archive-dir", archive_dir,
+    ]
+
+    state_archive_dirs = [
+        "--state-dir", state_dir,
+        "--archive-dir", archive_dir,
+    ]
+
+    return [
+        {
+            "stage": "storage_status",
+            "command": [
+                tool_path("lilhouse-storage-status"),
+                "--json",
+                "--state-dir", state_dir,
+                "--log-dir", log_dir,
+                "--archive-dir", archive_dir,
+            ],
+        },
+        {
+            "stage": "storage_clean_dry_run",
+            "command": [
+                tool_path("lilhouse-storage-clean"),
+                "--dry-run",
+                "--json",
+                *common_dirs,
+            ],
+        },
+        {
+            "stage": "storage_index_dry_run",
+            "command": [
+                tool_path("lilhouse-storage-index"),
+                "--dry-run",
+                "--json",
+                *common_dirs,
+            ],
+        },
+        {
+            "stage": "storage_ledger_checkpoint_dry_run",
+            "command": [
+                tool_path("lilhouse-storage-ledger-checkpoint"),
+                "--dry-run",
+                "--json",
+                *state_archive_dirs,
+            ],
+        },
+        {
+            "stage": "storage_summary_dry_run",
+            "command": [
+                tool_path("lilhouse-storage-summary"),
+                "--dry-run",
+                "--json",
+                *common_dirs,
+            ],
+        },
+    ]
+
+
+def summarize_stage(stage_result):
+    data = stage_result.get("json") if stage_result.get("json_ok") else None
+
+    summary = {
+        "stage": stage_result["stage"],
+        "ok": stage_result["ok"],
+        "json_ok": stage_result["json_ok"],
+        "returncode": stage_result["returncode"],
+    }
+
+    if not data:
+        return summary
+
+    if stage_result["stage"] == "storage_status":
+        summary["total_usage"] = data.get("total_human") or data.get("total_tracked_human")
+        summary["policy"] = data.get("policy") or data.get("storage_policy")
+        summary["ledger_count"] = len(data.get("ledgers", [])) if isinstance(data.get("ledgers"), list) else None
+
+    elif stage_result["stage"] == "storage_clean_dry_run":
+        summary["candidate_count"] = data.get("candidate_count")
+        summary["delete_count"] = data.get("delete_count")
+        summary["executes_changes"] = data.get("executes_changes")
+
+    elif stage_result["stage"] == "storage_index_dry_run":
+        summary["record_count"] = data.get("record_count") or data.get("result_count")
+        summary["writes_index"] = data.get("writes_index") or data.get("writes_files")
+
+    elif stage_result["stage"] == "storage_ledger_checkpoint_dry_run":
+        summary["candidate_count"] = data.get("candidate_count")
+        summary["executes_changes"] = data.get("executes_changes") or data.get("writes_files")
+
+    elif stage_result["stage"] == "storage_summary_dry_run":
+        totals = data.get("totals", {})
+        summary["hot_file_count"] = totals.get("hot_file_count")
+        summary["archive_file_count"] = totals.get("archive_file_count")
+        summary["archive_index_record_count"] = totals.get("archive_index_record_count")
+        summary["writes_files"] = data.get("writes_files")
+
+    return summary
+
+
+def recommended_next_steps(stage_results):
+    steps = [
+        "Review this report before running any write mode.",
+        "Use lilhouse-storage-query --path <term> --show --lines 40 to inspect raw evidence.",
+        "Use lilhouse-storage-summary --write-summary --yes only when you want an additive indexed summary.",
+    ]
+
+    by_stage = {s["stage"]: s for s in stage_results}
+
+    clean = by_stage.get("storage_clean_dry_run", {})
+    clean_json = clean.get("json") if clean.get("json_ok") else {}
+    if clean_json and clean_json.get("candidate_count", 0):
+        steps.append("Cleanup candidates exist; review lilhouse-storage-clean --dry-run output before archiving.")
+
+    index = by_stage.get("storage_index_dry_run", {})
+    index_json = index.get("json") if index.get("json_ok") else {}
+    if index_json:
+        steps.append("If index dry-run looks correct, update the searchable map with lilhouse-storage-index --write-index --yes.")
+
+    summary = by_stage.get("storage_summary_dry_run", {})
+    summary_json = summary.get("json") if summary.get("json_ok") else {}
+    if summary_json:
+        steps.append("If the dry-run summary is useful, persist it with lilhouse-storage-summary --write-summary --yes.")
+
+    return steps
+
+
+def print_human(report):
+    print()
+    print("======================================")
+    print(" LilHouse Storage Maintenance Plan")
+    print("======================================")
+    print()
+    print("Safety:")
+    print("  mode: dry-run")
+    print("  writes files: no")
+    print("  deletes files: no")
+    print("  truncates ledgers: no")
+    print("  executes cleanup: no")
+    print()
+
+    print("Stages:")
+    for item in report["stage_summaries"]:
+        ok = "✓" if item["ok"] else "✗"
+        json_note = "json" if item["json_ok"] else "text"
+        print(f"  {ok} {item['stage']} ({json_note}, rc={item['returncode']})")
+
+        for key in [
+            "total_usage",
+            "candidate_count",
+            "delete_count",
+            "record_count",
+            "hot_file_count",
+            "archive_file_count",
+            "archive_index_record_count",
+            "writes_files",
+            "writes_index",
+            "executes_changes",
+        ]:
+            if key in item and item[key] is not None:
+                print(f"      {key}: {item[key]}")
+
+    print()
+    print("Recommended next steps:")
+    for step in report["recommended_next_steps"]:
+        print(f"  - {step}")
+
+    print()
+    print(f"Overall status: {'OK' if report['ok'] else 'CHECK REQUIRED'}")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Run the safe LilHouse storage maintenance dry-run chain.")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--state-dir", default=DEFAULT_STATE_DIR)
+    ap.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
+    ap.add_argument("--archive-dir", default=DEFAULT_ARCHIVE_DIR)
+    args = ap.parse_args()
+
+    if not args.dry_run:
+        print("ERROR: lilhouse-storage-maintenance currently supports --dry-run only.", file=sys.stderr)
+        print("Try: sudo lilhouse-storage-maintenance --dry-run", file=sys.stderr)
+        return 2
+
+    stages = []
+    for spec in stage_specs(args):
+        stages.append(run_stage(spec["stage"], spec["command"]))
+
+    summaries = [summarize_stage(s) for s in stages]
+    ok = all(s["ok"] for s in stages)
+
+    report = {
+        "schema": "lilhouse.storage_maintenance_plan.v1",
+        "ok": ok,
+        "ts": now_iso(),
+        "mode": "dry_run",
+        "writes_files": False,
+        "deletes_files": False,
+        "truncates_ledgers": False,
+        "executes_cleanup": False,
+        "state_dir": str(Path(args.state_dir)),
+        "log_dir": str(Path(args.log_dir)),
+        "archive_dir": str(Path(args.archive_dir)),
+        "stage_summaries": summaries,
+        "stages": stages,
+        "recommended_next_steps": recommended_next_steps(stages),
+    }
+
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print_human(report)
+
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
