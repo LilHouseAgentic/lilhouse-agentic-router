@@ -1,0 +1,448 @@
+#!/usr/bin/env python3
+import argparse
+import gzip
+import hashlib
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path
+from datetime import datetime, timezone
+
+DEFAULT_STATE_DIR = os.environ.get("LILHOUSE_STATE_DIR", "/var/lib/lilhouse")
+DEFAULT_LOG_DIR = os.environ.get("LILHOUSE_LOG_DIR", "/var/log/lilhouse")
+DEFAULT_ARCHIVE_DIR = os.environ.get("LILHOUSE_ARCHIVE_DIR", "/var/lib/lilhouse/archive")
+
+ACTIVE_JSON = {
+    "current-state.json",
+    "storage-health.json",
+}
+
+ACTIVE_JSONL = {
+    "events.jsonl",
+    "actions.jsonl",
+    "proposals.jsonl",
+}
+
+
+def now_iso():
+    return datetime.now(timezone.utc).astimezone().isoformat()
+
+
+def human_bytes(num):
+    try:
+        num = float(num)
+    except Exception:
+        return "unknown"
+
+    units = ["B", "KB", "MB", "GB", "TB"]
+    for unit in units:
+        if abs(num) < 1024.0:
+            if unit == "B":
+                return f"{int(num)} {unit}"
+            return f"{num:.1f} {unit}"
+        num /= 1024.0
+    return f"{num:.1f} PB"
+
+
+def safe_stat(path):
+    try:
+        st = path.stat()
+        return {
+            "exists": True,
+            "bytes": st.st_size,
+            "mtime": datetime.fromtimestamp(st.st_mtime, timezone.utc).astimezone().isoformat(),
+            "age_seconds": max(0, int(datetime.now(timezone.utc).timestamp() - st.st_mtime)),
+        }
+    except Exception as exc:
+        return {
+            "exists": False,
+            "bytes": 0,
+            "mtime": None,
+            "age_seconds": 0,
+            "error": str(exc),
+        }
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with Path(path).open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def sha256_gzip_payload(path):
+    h = hashlib.sha256()
+    with gzip.open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def slug_for(path, root):
+    try:
+        rel = str(Path(path).relative_to(root))
+    except Exception:
+        rel = Path(path).name
+    return rel.replace("/", "__")
+
+
+def walk_files(root):
+    root = Path(root)
+    if not root.exists():
+        return
+    if root.is_file():
+        yield root
+        return
+
+    for dirpath, dirs, files in os.walk(root, topdown=True):
+        base = Path(dirpath)
+        dirs[:] = [
+            d for d in dirs
+            if d not in {".git", "__pycache__", "archive", "archives"}
+        ]
+        for name in files:
+            yield base / name
+
+
+def archive_target_for(candidate, archive_dir, state_dir, log_dir):
+    src = Path(candidate["source_path"])
+    source_sha = candidate["source_sha256"][:12]
+
+    if candidate["role"] == "hot_report":
+        slug = slug_for(src, state_dir)
+        return archive_dir / "reports" / f"{slug}.{source_sha}.gz"
+
+    if candidate["role"] == "hot_log":
+        slug = slug_for(src, log_dir)
+        return archive_dir / "logs" / f"{slug}.{source_sha}.gz"
+
+    raise ValueError(f"unsupported candidate role: {candidate['role']}")
+
+
+def build_candidates(args):
+    state_dir = Path(args.state_dir)
+    log_dir = Path(args.log_dir)
+    archive_dir = Path(args.archive_dir)
+
+    max_hot_bytes = args.max_hot_bytes
+    max_report_age_seconds = args.max_report_age_days * 86400
+
+    candidates = []
+    preserve = []
+
+    preserve.append({
+        "path": str(Path(args.state_dir) / "current-state.json"),
+        "reason": "latest state remains hot/plain if present",
+    })
+    preserve.append({
+        "path": str(Path(args.state_dir) / "storage-health.json"),
+        "reason": "latest storage health remains hot/plain if present",
+    })
+
+    for name in sorted(ACTIVE_JSONL):
+        p = state_dir / name
+        if p.exists():
+            preserve.append({
+                "path": str(p),
+                "reason": "active ledger is not archived/executed in v0.4.3",
+            })
+
+    for p in walk_files(state_dir):
+        if p.name in ACTIVE_JSON or p.name in ACTIVE_JSONL:
+            continue
+        if "archive" in p.parts or "archives" in p.parts:
+            continue
+        if not p.name.endswith(".json"):
+            continue
+
+        info = safe_stat(p)
+        if info["bytes"] > max_hot_bytes or info["age_seconds"] >= max_report_age_seconds:
+            source_sha = sha256_file(p)
+            role = "hot_report"
+            c = {
+                "role": role,
+                "action": "compress_copy_preserve_source",
+                "source_path": str(p),
+                "source_sha256": source_sha,
+                "source_bytes": info["bytes"],
+                "source_human": human_bytes(info["bytes"]),
+                "source_mtime": info["mtime"],
+                "reason": f"report is older than {args.max_report_age_days} days or larger than {human_bytes(max_hot_bytes)}",
+                "executes_now": bool(args.execute),
+                "deletes_source": False,
+            }
+            c["archive_path"] = str(archive_target_for(c, archive_dir, state_dir, log_dir))
+            candidates.append(c)
+        else:
+            preserve.append({
+                "path": str(p),
+                "reason": "recent/small report remains hot",
+            })
+
+    for p in walk_files(log_dir):
+        if p.name.endswith(".gz"):
+            preserve.append({
+                "path": str(p),
+                "reason": "already compressed",
+            })
+            continue
+
+        info = safe_stat(p)
+        if info["bytes"] > max_hot_bytes or info["age_seconds"] >= max_report_age_seconds:
+            source_sha = sha256_file(p)
+            role = "hot_log"
+            c = {
+                "role": role,
+                "action": "compress_copy_preserve_source",
+                "source_path": str(p),
+                "source_sha256": source_sha,
+                "source_bytes": info["bytes"],
+                "source_human": human_bytes(info["bytes"]),
+                "source_mtime": info["mtime"],
+                "reason": f"log is older than {args.max_report_age_days} days or larger than {human_bytes(max_hot_bytes)}",
+                "executes_now": bool(args.execute),
+                "deletes_source": False,
+            }
+            c["archive_path"] = str(archive_target_for(c, archive_dir, state_dir, log_dir))
+            candidates.append(c)
+        else:
+            preserve.append({
+                "path": str(p),
+                "reason": "recent/small log remains hot",
+            })
+
+    return candidates, preserve
+
+
+def gzip_copy_verify(source_path, archive_path):
+    src = Path(source_path)
+    dst = Path(archive_path)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    source_sha = sha256_file(src)
+
+    fd, tmp_name = tempfile.mkstemp(prefix=dst.name + ".", suffix=".tmp", dir=str(dst.parent))
+    os.close(fd)
+    tmp = Path(tmp_name)
+
+    try:
+        with src.open("rb") as f_in, gzip.open(tmp, "wb", compresslevel=6) as f_out:
+            for chunk in iter(lambda: f_in.read(1024 * 1024), b""):
+                f_out.write(chunk)
+
+        payload_sha = sha256_gzip_payload(tmp)
+        if payload_sha != source_sha:
+            raise RuntimeError("archive payload SHA256 mismatch")
+
+        archive_sha = sha256_file(tmp)
+        tmp.replace(dst)
+
+        return {
+            "ok": True,
+            "source_sha256": source_sha,
+            "archive_sha256": archive_sha,
+            "archive_payload_sha256": payload_sha,
+            "verified_payload_sha256_match": True,
+            "archive_bytes": dst.stat().st_size,
+            "archive_human": human_bytes(dst.stat().st_size),
+        }
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except Exception:
+            pass
+
+
+def append_index_records(index_file, records):
+    p = Path(index_file)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("a", encoding="utf-8") as f:
+        for rec in records:
+            f.write(json.dumps(rec, sort_keys=True) + "\n")
+
+
+def execute_candidates(args, candidates):
+    archive_records = []
+    executed = []
+    skipped = []
+
+    for c in candidates:
+        src = Path(c["source_path"])
+        dst = Path(c["archive_path"])
+
+        if dst.exists() and not args.overwrite:
+            skipped.append({
+                **c,
+                "ok": True,
+                "skipped": True,
+                "reason": "archive target already exists; not overwriting",
+            })
+            continue
+
+        result = gzip_copy_verify(src, dst)
+
+        rec = {
+            "schema": "lilhouse.storage_archive_action.v1",
+            "archived_at": now_iso(),
+            "action": "compress_copy_preserve_source",
+            "source_path": str(src),
+            "archive_path": str(dst),
+            "role": c["role"],
+            "source_bytes": c["source_bytes"],
+            "archive_bytes": result["archive_bytes"],
+            "source_sha256": result["source_sha256"],
+            "archive_sha256": result["archive_sha256"],
+            "archive_payload_sha256": result["archive_payload_sha256"],
+            "verified_payload_sha256_match": result["verified_payload_sha256_match"],
+            "deleted_source": False,
+            "agent_access": "gzip_then_parse",
+        }
+
+        archive_records.append(rec)
+        executed.append({
+            **c,
+            **result,
+            "ok": True,
+            "skipped": False,
+            "deleted_source": False,
+        })
+
+    if archive_records:
+        index_file = Path(args.index_file) if args.index_file else Path(args.archive_dir) / "index.jsonl"
+        append_index_records(index_file, archive_records)
+
+    return executed, skipped, archive_records
+
+
+def print_human(plan):
+    print()
+    print("======================================")
+    print(" LilHouse Storage Archive")
+    print("======================================")
+    print()
+    print("Safety:")
+    print(f"  mode: {plan['mode']}")
+    print(f"  writes archives: {'yes' if plan['writes_archives'] else 'no'}")
+    print("  deletes originals: no")
+    print("  active ledgers: preserved")
+    print("  index records: " + ("written" if plan["writes_archives"] else "not written"))
+    print()
+
+    print("Candidates:")
+    if plan["candidates"]:
+        for c in plan["candidates"]:
+            print(f"  - {c['role']}: {c['source_path']}")
+            print(f"    size:   {c['source_human']}")
+            print(f"    target: {c['archive_path']}")
+            print(f"    reason: {c['reason']}")
+    else:
+        print("  none")
+
+    if plan["executed"]:
+        print()
+        print("Executed:")
+        for e in plan["executed"]:
+            print(f"  - archived: {e['source_path']}")
+            print(f"    target:   {e['archive_path']}")
+            print(f"    verified: {e['verified_payload_sha256_match']}")
+            print(f"    original preserved: yes")
+
+    if plan["skipped"]:
+        print()
+        print("Skipped:")
+        for s in plan["skipped"]:
+            print(f"  - {s['source_path']}")
+            print(f"    reason: {s['reason']}")
+
+    print()
+    print(f"Candidate bytes: {plan['summary']['candidate_human']}")
+    print(f"Executed count:  {plan['summary']['executed_count']}")
+    print(f"Skipped count:   {plan['summary']['skipped_count']}")
+    print("Status: OK")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Safely archive/compress LilHouse logs and reports while preserving originals.")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--execute", action="store_true")
+    ap.add_argument("--yes", action="store_true")
+    ap.add_argument("--overwrite", action="store_true")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--state-dir", default=DEFAULT_STATE_DIR)
+    ap.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
+    ap.add_argument("--archive-dir", default=DEFAULT_ARCHIVE_DIR)
+    ap.add_argument("--index-file", default=None)
+    ap.add_argument("--max-hot-bytes", type=int, default=5 * 1024 * 1024)
+    ap.add_argument("--max-report-age-days", type=int, default=7)
+    args = ap.parse_args()
+
+    if args.execute and not args.yes:
+        print("ERROR: refusing archive execution without --yes.", file=sys.stderr)
+        print("Try: sudo lilhouse-storage-archive --execute --yes", file=sys.stderr)
+        return 2
+
+    if args.dry_run and args.execute:
+        print("ERROR: choose either --dry-run or --execute, not both.", file=sys.stderr)
+        return 2
+
+    if not args.dry_run and not args.execute:
+        print("ERROR: choose --dry-run or --execute --yes.", file=sys.stderr)
+        print("Try: sudo lilhouse-storage-archive --dry-run", file=sys.stderr)
+        return 2
+
+    candidates, preserve = build_candidates(args)
+    executed = []
+    skipped = []
+    archive_records = []
+
+    if args.execute:
+        executed, skipped, archive_records = execute_candidates(args, candidates)
+
+    candidate_bytes = sum(c["source_bytes"] for c in candidates)
+
+    plan = {
+        "schema": "lilhouse.storage_archive.v1",
+        "ok": True,
+        "ts": now_iso(),
+        "mode": "execute" if args.execute else "dry_run",
+        "writes_archives": bool(args.execute),
+        "deletes_originals": False,
+        "touches_active_ledgers": False,
+        "state_dir": str(Path(args.state_dir)),
+        "log_dir": str(Path(args.log_dir)),
+        "archive_dir": str(Path(args.archive_dir)),
+        "index_file": str(Path(args.index_file) if args.index_file else Path(args.archive_dir) / "index.jsonl"),
+        "policy": {
+            "preserve_originals": True,
+            "do_not_truncate_active_ledgers": True,
+            "do_not_delete_sources": True,
+            "verify_payload_hash": True,
+        },
+        "preserve": preserve,
+        "candidates": candidates,
+        "executed": executed,
+        "skipped": skipped,
+        "archive_records": archive_records,
+        "summary": {
+            "candidate_count": len(candidates),
+            "candidate_bytes": candidate_bytes,
+            "candidate_human": human_bytes(candidate_bytes),
+            "executed_count": len(executed),
+            "skipped_count": len(skipped),
+            "deleted_count": 0,
+        },
+    }
+
+    if args.json:
+        print(json.dumps(plan, indent=2, sort_keys=True))
+    else:
+        print_human(plan)
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
