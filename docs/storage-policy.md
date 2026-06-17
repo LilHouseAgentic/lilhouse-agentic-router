@@ -146,3 +146,16 @@ This command is a compression/archive primitive, not a cleanup/deletion tool.
 It does not write archives, append index records, truncate ledgers, delete files, or modify active history.
 
 The dry-run plan shows the archive target, source SHA256, line count, byte size, and the exact safety order required before a future checkpoint execution can exist.
+
+## Storage query
+
+`lilhouse-storage-query` provides read-only lookup across hot LilHouse storage and archive indexes.
+
+It is intended for humans and future agents that need to find historical observations without scanning every file manually.
+
+Examples:
+
+    sudo lilhouse-storage-query --list
+    sudo lilhouse-storage-query --type ledger
+    sudo lilhouse-storage-query --type archive
+    sudo lilhouse-storage-query --path events
