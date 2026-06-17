@@ -1,0 +1,319 @@
+#!/usr/bin/env python3
+import argparse
+import gzip
+import hashlib
+import json
+import os
+import sys
+from pathlib import Path
+from datetime import datetime, timezone
+
+DEFAULT_STATE_DIR = os.environ.get("LILHOUSE_STATE_DIR", "/var/lib/lilhouse")
+DEFAULT_LOG_DIR = os.environ.get("LILHOUSE_LOG_DIR", "/var/log/lilhouse")
+DEFAULT_ARCHIVE_DIR = os.environ.get("LILHOUSE_ARCHIVE_DIR", "/var/lib/lilhouse/archive")
+
+ACTIVE_JSON = {
+    "current-state.json",
+    "storage-health.json",
+}
+
+ACTIVE_JSONL = {
+    "events.jsonl",
+    "actions.jsonl",
+    "proposals.jsonl",
+}
+
+
+def now_iso():
+    return datetime.now(timezone.utc).astimezone().isoformat()
+
+
+def human_bytes(num):
+    try:
+        num = float(num)
+    except Exception:
+        return "unknown"
+
+    units = ["B", "KB", "MB", "GB", "TB"]
+    for unit in units:
+        if abs(num) < 1024.0:
+            if unit == "B":
+                return f"{int(num)} {unit}"
+            return f"{num:.1f} {unit}"
+        num /= 1024.0
+    return f"{num:.1f} PB"
+
+
+def safe_stat(path):
+    try:
+        st = path.stat()
+        return {
+            "exists": True,
+            "bytes": st.st_size,
+            "mtime": datetime.fromtimestamp(st.st_mtime, timezone.utc).astimezone().isoformat(),
+        }
+    except Exception as exc:
+        return {
+            "exists": False,
+            "bytes": 0,
+            "mtime": None,
+            "error": str(exc),
+        }
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    try:
+        with Path(path).open("rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return None
+
+
+def count_lines(path):
+    p = Path(path)
+    if not p.exists() or not p.is_file():
+        return 0
+
+    try:
+        if p.name.endswith(".gz"):
+            with gzip.open(p, "rt", encoding="utf-8", errors="replace") as f:
+                return sum(1 for _ in f)
+        with p.open("r", encoding="utf-8", errors="replace") as f:
+            return sum(1 for _ in f)
+    except Exception:
+        return 0
+
+
+def infer_role(path, state_dir, log_dir, archive_dir):
+    p = Path(path)
+    name = p.name
+
+    try:
+        p.relative_to(archive_dir)
+        if name.endswith(".gz"):
+            return "archive_compressed"
+        return "archive_file"
+    except Exception:
+        pass
+
+    try:
+        p.relative_to(log_dir)
+        return "hot_log"
+    except Exception:
+        pass
+
+    try:
+        p.relative_to(state_dir)
+        if name in ACTIVE_JSONL:
+            return "hot_active_ledger"
+        if name in ACTIVE_JSON:
+            return "hot_latest_state"
+        if name.endswith(".jsonl"):
+            return "hot_jsonl_history"
+        if name.endswith(".json"):
+            return "hot_report"
+        return "hot_state_file"
+    except Exception:
+        pass
+
+    return "unknown"
+
+
+def agent_access_for(path):
+    p = Path(path)
+    if p.name.endswith(".gz"):
+        return "gzip_then_parse"
+    return "direct_read"
+
+
+def file_kind(path):
+    name = Path(path).name
+    if name.endswith(".jsonl.gz"):
+        return "jsonl_gzip"
+    if name.endswith(".json.gz"):
+        return "json_gzip"
+    if name.endswith(".log.gz") or name.endswith(".txt.gz"):
+        return "text_gzip"
+    if name.endswith(".jsonl"):
+        return "jsonl"
+    if name.endswith(".json"):
+        return "json"
+    if name.endswith(".log") or name.endswith(".txt"):
+        return "text"
+    if name.endswith(".gz"):
+        return "gzip"
+    return "file"
+
+
+def walk_files(root, index_file=None):
+    root = Path(root)
+    if not root.exists():
+        return
+    if root.is_file():
+        if index_file is None or root.resolve() != Path(index_file).resolve():
+            yield root
+        return
+
+    for dirpath, dirs, files in os.walk(root, topdown=True):
+        base = Path(dirpath)
+        dirs[:] = [d for d in dirs if d not in {".git", "__pycache__"}]
+
+        for name in files:
+            p = base / name
+            if index_file is not None:
+                try:
+                    if p.resolve() == Path(index_file).resolve():
+                        continue
+                except Exception:
+                    pass
+            yield p
+
+
+def build_records(args):
+    state_dir = Path(args.state_dir)
+    log_dir = Path(args.log_dir)
+    archive_dir = Path(args.archive_dir)
+    index_file = Path(args.index_file) if args.index_file else archive_dir / "index.jsonl"
+
+    seen = set()
+    records = []
+
+    for root in [state_dir, log_dir, archive_dir]:
+        for p in walk_files(root, index_file=index_file):
+            try:
+                key = str(p.resolve())
+            except Exception:
+                key = str(p)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            info = safe_stat(p)
+            if not info["exists"]:
+                continue
+
+            kind = file_kind(p)
+            line_count = count_lines(p) if kind in {"jsonl", "jsonl_gzip", "text", "text_gzip"} else None
+
+            record = {
+                "schema": "lilhouse.storage_index_record.v1",
+                "indexed_at": now_iso(),
+                "path": str(p),
+                "role": infer_role(p, state_dir, log_dir, archive_dir),
+                "kind": kind,
+                "compressed": p.name.endswith(".gz"),
+                "agent_access": agent_access_for(p),
+                "bytes": info["bytes"],
+                "human": human_bytes(info["bytes"]),
+                "mtime": info["mtime"],
+                "sha256": sha256_file(p),
+                "line_count": line_count,
+            }
+
+            records.append(record)
+
+    records.sort(key=lambda r: (r["role"], r["path"]))
+    return records
+
+
+def write_index(index_file, records):
+    p = Path(index_file)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        for rec in records:
+            f.write(json.dumps(rec, sort_keys=True) + "\n")
+    tmp.replace(p)
+    return p
+
+
+def print_human(args, records, wrote_path=None):
+    print()
+    print("======================================")
+    print(" LilHouse Storage Archive Index")
+    print("======================================")
+    print()
+    print("Mode:")
+    if wrote_path:
+        print("  write index: yes")
+        print(f"  index file:  {wrote_path}")
+    else:
+        print("  dry-run: yes")
+        print("  write index: no")
+    print()
+    print(f"Indexed records: {len(records)}")
+
+    counts = {}
+    total = 0
+    for rec in records:
+        counts[rec["role"]] = counts.get(rec["role"], 0) + 1
+        total += rec.get("bytes", 0)
+
+    print(f"Total indexed bytes: {human_bytes(total)}")
+    print()
+    print("By role:")
+    for role in sorted(counts):
+        print(f"  {role:<24} {counts[role]}")
+    print()
+    print("Sample records:")
+    for rec in records[:12]:
+        print(f"  - {rec['role']}: {rec['path']} ({rec['human']})")
+    if len(records) > 12:
+        print(f"  ... {len(records) - 12} more")
+    print()
+    print("Status: OK")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Build a searchable index of LilHouse hot and archived history.")
+    ap.add_argument("--dry-run", action="store_true", help="Show index records without writing index file.")
+    ap.add_argument("--write-index", action="store_true", help="Write index.jsonl.")
+    ap.add_argument("--yes", action="store_true", help="Required with --write-index.")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--state-dir", default=DEFAULT_STATE_DIR)
+    ap.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
+    ap.add_argument("--archive-dir", default=DEFAULT_ARCHIVE_DIR)
+    ap.add_argument("--index-file", default=None)
+    args = ap.parse_args()
+
+    if args.write_index and not args.yes:
+        print("ERROR: refusing to write index without --yes.", file=sys.stderr)
+        print("Try: sudo lilhouse-storage-index --write-index --yes", file=sys.stderr)
+        return 2
+
+    if not args.dry_run and not args.write_index:
+        print("ERROR: choose --dry-run or --write-index --yes.", file=sys.stderr)
+        print("Try: sudo lilhouse-storage-index --dry-run", file=sys.stderr)
+        return 2
+
+    records = build_records(args)
+    index_file = Path(args.index_file) if args.index_file else Path(args.archive_dir) / "index.jsonl"
+
+    wrote_path = None
+    if args.write_index:
+        wrote_path = write_index(index_file, records)
+
+    report = {
+        "schema": "lilhouse.storage_index.v1",
+        "ok": True,
+        "ts": now_iso(),
+        "mode": "write_index" if args.write_index else "dry_run",
+        "writes_files": bool(args.write_index),
+        "index_file": str(index_file),
+        "record_count": len(records),
+        "records": records,
+    }
+
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print_human(args, records, wrote_path=wrote_path)
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

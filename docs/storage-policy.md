@@ -80,3 +80,31 @@ The first alpha implementation is intentionally read-only:
 - it preserves active state, active config, and live ledgers
 
 Future archive execution must preserve agent access to old worker observations by writing compressed archives and indexes before any live ledger checkpointing occurs.
+
+## Archive index
+
+`lilhouse-storage-index` builds a searchable index of hot and archived LilHouse history.
+
+The index is designed so future agents can locate historical worker observations without scanning every file every time.
+
+Index records include:
+
+- original path
+- role
+- file kind
+- compression status
+- agent access method
+- size
+- modification time
+- SHA256 checksum
+- line count where useful
+
+The index may be previewed with:
+
+    sudo lilhouse-storage-index --dry-run
+
+Writing the index is guarded:
+
+    sudo lilhouse-storage-index --write-index --yes
+
+The index itself is stored under the LilHouse archive directory and must not replace raw archives.
