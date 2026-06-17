@@ -94,6 +94,33 @@ Expected alpha result:
 - scripts/audit-secrets.sh — repo safety/secret/risky-pattern audit
 - tests/smoke-test.sh — broad repo smoke test
 
+## Storage safety and history retention
+
+LilHouse is designed to run continuously without silently growing logs forever or deleting useful history.
+
+The storage model is lossless by default:
+
+- current state stays readable as plain JSON
+- active ledgers are preserved
+- cleanup starts as dry-run planning
+- archive actions are indexed
+- archive execution preserves originals
+- compressed archives are verified with SHA256
+- active ledger checkpointing is not enabled yet
+
+Useful commands:
+
+    sudo lilhouse-storage-status
+    sudo lilhouse-storage-clean --dry-run
+    sudo lilhouse-storage-index --dry-run
+    sudo lilhouse-storage-index --write-index --yes
+    sudo lilhouse-storage-archive --dry-run
+    sudo lilhouse-storage-archive --execute --yes
+
+Current alpha archive execution is intentionally narrow. It only compresses/copies logs and old JSON reports. It does not delete originals, truncate active ledgers, archive active ledgers, modify config, or clean arbitrary system files.
+
+The goal is to keep router telemetry useful for agents over time without letting storage growth become a hidden problem.
+
 ## Development checks
 
 Before committing:
