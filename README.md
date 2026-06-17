@@ -106,7 +106,7 @@ The storage model is lossless by default:
 - archive actions are indexed
 - archive execution preserves originals
 - compressed archives are verified with SHA256
-- active ledger checkpointing is not enabled yet
+- active ledger checkpointing is dry-run only
 
 Useful commands:
 
@@ -116,8 +116,9 @@ Useful commands:
     sudo lilhouse-storage-index --write-index --yes
     sudo lilhouse-storage-archive --dry-run
     sudo lilhouse-storage-archive --execute --yes
+    sudo lilhouse-storage-ledger-checkpoint --dry-run
 
-Current alpha archive execution is intentionally narrow. It only compresses/copies logs and old JSON reports. It does not delete originals, truncate active ledgers, archive active ledgers, modify config, or clean arbitrary system files.
+Current alpha archive execution is intentionally narrow. It only compresses/copies logs and old JSON reports. It does not delete originals, truncate active ledgers, archive active ledgers, modify config, or clean arbitrary system files. Ledger checkpointing is dry-run planning only.
 
 The goal is to keep router telemetry useful for agents over time without letting storage growth become a hidden problem.
 
