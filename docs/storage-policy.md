@@ -186,3 +186,17 @@ Summary write mode requires an explicit confirmation:
     sudo lilhouse-storage-summary --write-summary --yes
 
 Written summaries are JSON files under the archive directory and are also indexed for later lookup. Summaries never replace raw history, delete files, or truncate ledgers.
+
+## Storage maintenance plan
+
+`lilhouse-storage-maintenance --dry-run` runs the safe storage maintenance chain as one combined report.
+
+It orchestrates:
+
+    lilhouse-storage-status --json
+    lilhouse-storage-clean --dry-run --json
+    lilhouse-storage-index --dry-run --json
+    lilhouse-storage-ledger-checkpoint --dry-run --json
+    lilhouse-storage-summary --dry-run --json
+
+The maintenance command is dry-run only. It does not delete files, truncate ledgers, execute cleanup, write summaries, or write indexes.

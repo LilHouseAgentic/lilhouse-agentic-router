@@ -232,6 +232,7 @@ backup_existing /usr/local/bin/lilhouse-storage-archive
 backup_existing /usr/local/bin/lilhouse-storage-ledger-checkpoint
 backup_existing /usr/local/bin/lilhouse-storage-query
 backup_existing /usr/local/bin/lilhouse-storage-summary
+backup_existing /usr/local/bin/lilhouse-storage-maintenance
 backup_existing /usr/local/bin/lilhouse-interface-report
 backup_existing /usr/local/bin/lilhouse-router-plan
 backup_existing /usr/local/bin/lilhouse-router-plan-summary
@@ -303,6 +304,7 @@ install -m 0755 "$REPO_DIR/bin/lilhouse-storage-archive" "$(root_path /usr/local
 install -m 0755 "$REPO_DIR/bin/lilhouse-storage-ledger-checkpoint" "$(root_path /usr/local/bin/lilhouse-storage-ledger-checkpoint)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-storage-query" "$(root_path /usr/local/bin/lilhouse-storage-query)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-storage-summary" "$(root_path /usr/local/bin/lilhouse-storage-summary)"
+install -m 0755 "$REPO_DIR/bin/lilhouse-storage-maintenance" "$(root_path /usr/local/bin/lilhouse-storage-maintenance)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-interface-report" "$(root_path /usr/local/bin/lilhouse-interface-report)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-plan" "$(root_path /usr/local/bin/lilhouse-router-plan)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-plan-summary" "$(root_path /usr/local/bin/lilhouse-router-plan-summary)"
@@ -384,6 +386,7 @@ echo "  sudo lilhouse-storage-archive --dry-run"
 echo "  sudo lilhouse-storage-ledger-checkpoint --dry-run"
 echo "  sudo lilhouse-storage-query --list"
 echo "  sudo lilhouse-storage-summary --dry-run"
+echo "  sudo lilhouse-storage-maintenance --dry-run"
 echo "  lilhouse-router-status"
 echo "  sudo lilhouse-cake-set --down 250 --up 35"
 echo "  systemctl status lilhouse-current-state.timer --no-pager"
