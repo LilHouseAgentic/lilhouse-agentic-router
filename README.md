@@ -194,6 +194,18 @@ Default security posture:
 
 Agent-related tools are currently read-only status/readiness helpers. They do not autonomously change router settings.
 
+## Intellectual property
+
+The software code in this repository is released under the MIT License. See [LICENSE](LICENSE).
+
+Copyright notices and attribution are documented in [NOTICE](NOTICE).
+
+The MIT License grants rights to use, copy, modify, distribute, and sell copies of
+the software, subject to the license terms. It does not grant ownership of the
+LilHouse project name, branding, logos, or marks.
+
+Project names and branding are covered separately in [TRADEMARKS.md](TRADEMARKS.md).
+
 ## Current alpha scope
 
 Current alpha focus:
