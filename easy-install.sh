@@ -941,25 +941,45 @@ run_logged() {
   fi
 }
 
-echo
-echo "======================================"
-echo " LilHouse Agentic Router Installer"
-echo "======================================"
-echo
-if [ "$MODE" = "vm-live" ]; then DISPLAY_MODE="full-install"; else DISPLAY_MODE="dry-run"; fi
-echo "Mode:       $DISPLAY_MODE"
-echo "WAN:        $WAN"
-echo "LAN:        $LAN"
-echo "Gateway:    $LAN_IP"
-echo "Subnet:     $LAN_NET"
-echo "DHCP:       $DHCP_START-$DHCP_END"
-echo "CAKE:       $CAKE_PROFILE ($CAKE_DOWN down / $CAKE_UP up)"
-echo "Work dir:   $WORK_DIR"
-echo "Logs:       $LOG_DIR"
-echo
+print_run_header() {
+  echo
+  echo "======================================"
+  if [ "$MODE" = "vm-live" ]; then
+    echo " LilHouse is installing"
+    DISPLAY_MODE="full-install"
+  else
+    echo " LilHouse dry-run preview"
+    DISPLAY_MODE="dry-run"
+  fi
+  echo "======================================"
+  echo
+  echo "Mode:"
+  echo "  $DISPLAY_MODE"
+  echo
+  echo "Network:"
+  echo "  WAN/upstream: $WAN"
+  echo "  LAN/client:   $LAN"
+  echo
+  echo "Client network:"
+  echo "  Gateway/DNS:  $LAN_IP"
+  echo "  Subnet:       $LAN_NET"
+  echo "  DHCP range:   $DHCP_START-$DHCP_END"
+  echo
+  echo "Services:"
+  echo "  DNS/DHCP:     Pi-hole + Unbound"
+  echo "  Firewall:     nftables NAT"
+  echo "  SQM/QoS:      CAKE ($CAKE_PROFILE, $CAKE_DOWN down / $CAKE_UP up)"
+  echo
+  echo "Reports/logs:"
+  echo "  Work dir:     $WORK_DIR"
+  echo "  Logs:         $LOG_DIR"
+  echo
+}
+
+print_run_header
 
 if [ "$MODE" = "vm" ]; then
-  echo "Running dry-run simulation..."
+  echo "Running dry-run checks..."
   run_logged "Building VM readiness bundle" "$LOG_DIR/01-vm-readiness-bundle.log" \
     "$BUNDLE" \
     --work-dir "$WORK_DIR/vm-readiness-bundle" \
@@ -973,9 +993,9 @@ if [ "$MODE" = "vm" ]; then
   exit 0
 fi
 
-echo "Installing..."
+echo "Running full install..."
 # Audit safety marker: WARNING: --vm-live installs/activates into / on this disposable VM.
-echo "Detailed logs are saved if anything fails. Final checks will show whether the install was successful."
+echo "Detailed logs are saved in: $LOG_DIR"
 echo
 
 echo "Resetting VM-live work reports..."
