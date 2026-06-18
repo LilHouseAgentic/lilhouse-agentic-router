@@ -33,6 +33,10 @@ warn() {
   WARN=1
 }
 
+info() {
+  printf '  • %s\n' "$*"
+}
+
 have_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
@@ -231,6 +235,10 @@ if [ "$FAIL" -eq 0 ]; then
 
   if [ "$WARN" -gt 0 ]; then
     echo "  Notes: warnings present, but no hard blocker found"
+  elif [ "${lease_count:-0}" -gt 0 ]; then
+    echo "  Notes: observed LAN DHCP leases; router side looks ready"
+  else
+    echo "  Notes: router side looks ready; waiting for a LAN device lease"
   fi
 
   exit 0
