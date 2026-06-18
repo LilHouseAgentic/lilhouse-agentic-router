@@ -2077,4 +2077,17 @@ set -e
 test "$VM_LIVE_NO_THROWAWAY_RC" -eq 2
 grep -q -- "--i-am-in-a-throwaway-vm" "$TMP_STATE/easy-install-vm-live-refuse.out"
 
+
+echo
+echo "== verify easy installer LAN subnet picker text =="
+grep -q "1) Auto  \\[default\\]" easy-install.sh
+grep -q "Prefer 192.168.2.0/24 unless WAN/upstream already uses it." easy-install.sh
+grep -q "192.168.50.1/24" easy-install.sh
+grep -q "Custom 192.168.x.1/24" easy-install.sh
+grep -q "Choose another 192.168.x.0/24 LAN subnet." easy-install.sh
+if grep -q "10.10.10.1/24" easy-install.sh; then
+  echo "ERROR: easy installer should not advertise 10.x LAN subnets" >&2
+  exit 1
+fi
+
 echo "Smoke test passed."
