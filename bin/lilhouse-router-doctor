@@ -1,0 +1,308 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+SCHEMA = "lilhouse.router_doctor.v1"
+
+
+def now_iso():
+    return datetime.now(timezone.utc).astimezone().isoformat()
+
+
+def sibling_or_path(name):
+    here = Path(__file__).resolve().parent
+    candidate = here / name
+    if candidate.exists() and os.access(candidate, os.X_OK):
+        return str(candidate), "sibling_bin"
+    found = shutil.which(name)
+    if found:
+        return found, "path"
+    return name, "missing"
+
+
+def run_stage(stage, argv, timeout=45):
+    started = now_iso()
+    try:
+        p = subprocess.run(
+            argv,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
+        )
+        return {
+            "stage": stage,
+            "command": argv,
+            "started_at": started,
+            "finished_at": now_iso(),
+            "returncode": p.returncode,
+            "stdout": p.stdout,
+            "stderr": p.stderr,
+            "timed_out": False,
+        }
+    except subprocess.TimeoutExpired as e:
+        return {
+            "stage": stage,
+            "command": argv,
+            "started_at": started,
+            "finished_at": now_iso(),
+            "returncode": 124,
+            "stdout": e.stdout or "",
+            "stderr": e.stderr or "",
+            "timed_out": True,
+        }
+
+
+def tail_lines(text, limit):
+    lines = (text or "").splitlines()
+    if len(lines) <= limit:
+        return lines
+    return lines[-limit:]
+
+
+def parse_json(text):
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+
+def classify_text_stage(stage, result):
+    out = result.get("stdout", "")
+    err = result.get("stderr", "")
+    combined = out + "\n" + err
+
+    findings = []
+    for line in combined.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("✗") or stripped.startswith("!"):
+            findings.append(stripped)
+
+    status = "ok"
+    reason = "no hard issue detected"
+
+    if result.get("timed_out"):
+        return "fail", "command timed out", findings
+
+    if stage == "router_status":
+        if "Status: OK" in combined:
+            return "ok", "router status reports OK", findings
+        if "Status: needs attention" in combined:
+            return "warn", "router status reports needs attention", findings
+        if result.get("returncode", 0) != 0:
+            return "warn", "router status returned non-zero", findings
+        return status, reason, findings
+
+    if stage == "client_readiness":
+        if "Status: client-ready-with-lease" in combined:
+            return "ok", "LAN client lease observed", findings
+        if "Status: client-ready-waiting-for-device" in combined:
+            return "wait", "router side ready; waiting for LAN client lease", findings
+        if "Status: not-client-ready" in combined:
+            return "fail", "client readiness reports not ready", findings
+        if result.get("returncode", 0) != 0:
+            return "warn", "client readiness returned non-zero", findings
+        return status, reason, findings
+
+    if result.get("returncode", 0) != 0:
+        return "warn", "command returned non-zero", findings
+
+    return status, reason, findings
+
+
+def classify_json_stage(stage, result):
+    parsed = parse_json(result.get("stdout", ""))
+    result["json"] = parsed
+
+    if result.get("timed_out"):
+        return "fail", "command timed out", []
+
+    if parsed is None:
+        if result.get("returncode", 0) != 0:
+            return "warn", "command returned non-zero and did not emit JSON", []
+        return "warn", "command did not emit valid JSON", []
+
+    ok = parsed.get("ok")
+    if ok is True:
+        return "ok", "JSON status ok=true", []
+    if ok is False:
+        return "warn", "JSON status ok=false", []
+
+    if result.get("returncode", 0) != 0:
+        return "warn", "command returned non-zero", []
+
+    return "ok", "JSON parsed", []
+
+
+def build_stage(name, command_name, args, json_stage=False):
+    cmd, source = sibling_or_path(command_name)
+    if source == "missing":
+        return {
+            "stage": name,
+            "command": [command_name] + args,
+            "source": "missing",
+            "returncode": 127,
+            "stdout": "",
+            "stderr": f"missing command: {command_name}",
+            "timed_out": False,
+            "doctor_status": "fail",
+            "doctor_reason": "required command missing",
+            "findings": [f"missing command: {command_name}"],
+        }
+
+    result = run_stage(name, [cmd] + args)
+    result["source"] = source
+
+    if json_stage:
+        status, reason, findings = classify_json_stage(name, result)
+    else:
+        status, reason, findings = classify_text_stage(name, result)
+
+    result["doctor_status"] = status
+    result["doctor_reason"] = reason
+    result["findings"] = findings
+    return result
+
+
+def overall_status(stages):
+    statuses = [s.get("doctor_status") for s in stages]
+    if "fail" in statuses:
+        return "FAIL"
+    if "warn" in statuses:
+        return "WARN"
+    if "wait" in statuses:
+        return "WAIT"
+    return "OK"
+
+
+def suggested_next_commands(stages):
+    suggestions = []
+    by_name = {s["stage"]: s for s in stages}
+
+    router = by_name.get("router_status", {})
+    client = by_name.get("client_readiness", {})
+    agent = by_name.get("agent_status", {})
+    storage = by_name.get("storage_status", {})
+
+    if router.get("doctor_status") in ("warn", "fail"):
+        suggestions.append("sudo lilhouse-router-status")
+    if client.get("doctor_status") in ("wait", "warn", "fail"):
+        suggestions.append("sudo lilhouse-client-readiness")
+    if storage.get("doctor_status") in ("warn", "fail"):
+        suggestions.append("sudo lilhouse-storage-status")
+    if agent.get("doctor_status") in ("warn", "fail"):
+        suggestions.append("lilhouse-agent-status")
+
+    if not suggestions:
+        suggestions.append("No immediate action suggested.")
+
+    return suggestions
+
+
+def compact_stage(stage, line_limit):
+    return {
+        "stage": stage["stage"],
+        "command": stage.get("command", []),
+        "source": stage.get("source"),
+        "returncode": stage.get("returncode"),
+        "doctor_status": stage.get("doctor_status"),
+        "doctor_reason": stage.get("doctor_reason"),
+        "findings": stage.get("findings", []),
+        "stdout_excerpt": tail_lines(stage.get("stdout", ""), line_limit),
+        "stderr_excerpt": tail_lines(stage.get("stderr", ""), line_limit),
+        "json": stage.get("json"),
+    }
+
+
+def print_human(report):
+    print()
+    print("======================================")
+    print(" LilHouse Router Doctor")
+    print("======================================")
+    print()
+    print("Safety:")
+    print("  mode: read-only diagnosis")
+    if report.get("running_as_root"):
+        print("  privilege: root/full read access")
+    else:
+        print("  privilege: non-root/limited read access")
+        print("  note: run with sudo for full NAT and DHCP lease checks")
+    print("  writes files: no")
+    print("  changes router settings: no")
+    print()
+    print(f"Overall: {report['overall_status']}")
+    print()
+
+    print("Stages:")
+    for s in report["stages"]:
+        status = s["doctor_status"]
+        icon = "✓" if status == "ok" else ("•" if status == "wait" else ("✗" if status == "fail" else "!"))
+        print(f"  {icon} {s['stage']}: {status.upper()} — {s['doctor_reason']}")
+
+    findings = []
+    for s in report["stages"]:
+        for finding in s.get("findings", []):
+            findings.append((s["stage"], finding))
+
+    print()
+    print("Findings:")
+    if findings:
+        for stage, finding in findings[:20]:
+            print(f"  ! {stage}: {finding}")
+        if len(findings) > 20:
+            print(f"  ... {len(findings) - 20} more finding(s) hidden")
+    else:
+        print("  ✓ No warning/failure lines found")
+
+    print()
+    print("Suggested next commands:")
+    for cmd in report["suggested_next_commands"]:
+        print(f"  - {cmd}")
+
+    print()
+    print("Agent note:")
+    print("  Use --json for structured read-only diagnosis.")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Read-only LilHouse router diagnosis for humans and agents.")
+    ap.add_argument("--json", action="store_true", help="Emit structured JSON for agents.")
+    ap.add_argument("--lines", type=int, default=80, help="Excerpt line limit per stage in JSON output.")
+    args = ap.parse_args()
+
+    stages = [
+        build_stage("router_status", "lilhouse-router-status", []),
+        build_stage("client_readiness", "lilhouse-client-readiness", []),
+        build_stage("agent_status", "lilhouse-agent-status", ["--json"], json_stage=True),
+        build_stage("storage_status", "lilhouse-storage-status", ["--json"], json_stage=True),
+    ]
+
+    report = {
+        "schema": SCHEMA,
+        "ts": now_iso(),
+        "mode": "read_only_router_doctor",
+        "running_as_root": os.geteuid() == 0,
+        "writes_files": False,
+        "executes_router_changes": False,
+        "overall_status": overall_status(stages),
+        "stages": [compact_stage(s, args.lines) for s in stages],
+        "suggested_next_commands": suggested_next_commands(stages),
+    }
+
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print_human(report)
+
+    return 0 if report["overall_status"] in ("OK", "WAIT", "WARN") else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

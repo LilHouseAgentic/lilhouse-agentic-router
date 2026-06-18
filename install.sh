@@ -289,6 +289,7 @@ backup_existing /usr/local/bin/lilhouse-status
 backup_existing /usr/local/bin/lilhouse-cake-set
 backup_existing /usr/local/bin/lilhouse-router-status
 backup_existing /usr/local/bin/lilhouse-client-readiness
+backup_existing /usr/local/bin/lilhouse-router-doctor
 backup_existing /etc/systemd/system/lilhouse-current-state.service
 backup_existing /etc/systemd/system/lilhouse-current-state.timer
 backup_existing /etc/systemd/system/lilhouse-storage-health.service
@@ -368,6 +369,7 @@ install -m 0755 "$REPO_DIR/bin/lilhouse-status" "$(root_path /usr/local/bin/lilh
 install -m 0755 "$REPO_DIR/bin/lilhouse-cake-set" "$(root_path /usr/local/bin/lilhouse-cake-set)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-status" "$(root_path /usr/local/bin/lilhouse-router-status)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-client-readiness" "$(root_path /usr/local/bin/lilhouse-client-readiness)"
+install -m 0755 "$REPO_DIR/bin/lilhouse-router-doctor" "$(root_path /usr/local/bin/lilhouse-router-doctor)"
 
 install -m 0644 "$REPO_DIR/systemd/lilhouse-current-state.service" "$(root_path /etc/systemd/system/lilhouse-current-state.service)"
 install -m 0644 "$REPO_DIR/systemd/lilhouse-current-state.timer" "$(root_path /etc/systemd/system/lilhouse-current-state.timer)"
@@ -401,6 +403,7 @@ echo "  lilhouse-agent-readiness --check"
 echo "  lilhouse-agent-status --json"
 echo "  lilhouse-router-status"
 echo "  sudo lilhouse-client-readiness"
+echo "  sudo lilhouse-router-doctor"
 echo "  sudo lilhouse-cake-set --down 250 --up 35"
 echo "  systemctl status lilhouse-current-state.timer --no-pager"
 echo "  systemctl status lilhouse-storage-health.timer --no-pager"

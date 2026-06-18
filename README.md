@@ -170,6 +170,7 @@ lilhouse-agent-status
 ```bash
 sudo lilhouse-router-status
 sudo lilhouse-client-readiness
+sudo lilhouse-router-doctor
 sudo lilhouse-cake-set --down 220 --up 30
 sudo lilhouse-storage-status
 sudo lilhouse-storage-maintenance --dry-run
