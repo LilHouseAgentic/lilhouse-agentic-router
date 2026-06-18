@@ -1,201 +1,130 @@
 # LilHouse Agentic Router
 
-Turn a fresh Debian machine with two wired NICs into a smart home router with one copy-paste install.
+Turn a fresh Debian machine with two wired network ports into a smart home router.
 
-LilHouse Agentic Router is an alpha router appliance that installs Pi-hole, Unbound, nftables, CAKE/SQM, health checks, telemetry, and a guarded live apply flow.
+LilHouse Agentic Router installs and wires together:
 
-Start here:
+* Pi-hole for DNS and DHCP
+* Unbound for local recursive DNS
+* nftables for firewalling and NAT
+* CAKE/SQM for latency-friendly traffic shaping
+* router health checks
+* client readiness checks
+* storage safety tools
+* read-only agent readiness/status tools
 
-- [Fresh install guide](docs/FRESH-INSTALL.md)
+The project is currently a public alpha. It is intended for fresh Debian test routers, spare machines, Raspberry Pi-style router builds, and disposable VMs.
 
-Alpha warning: test on a spare machine, disposable VM, or test machine first.
+Do not run the full router installer on your current live router unless you are intentionally replacing it and have a recovery path.
 
-## Current status
+## What LilHouse does
 
-**Status: ALPHA**
+LilHouse turns this:
 
-The current alpha path has been proven in a disposable Debian VM using the full throwaway install flow.
+```text
+internet / modem / Starlink
+        |
+   Debian machine
+   with two NICs
+        |
+  LAN switch / Wi-Fi AP / client devices
+```
 
-This is not production-polished yet. It is a working, safety-gated appliance foundation for testing, review, and controlled iteration.
+into this:
 
-## Alpha proof
+```text
+WAN side:
+  upstream internet connection
 
-The alpha VM path verifies:
+LAN side:
+  DHCP
+  DNS
+  gateway
+  NAT
+  firewall
+  CAKE/SQM
+  router health checks
+```
 
-- full appliance preparation
-- Pi-hole + Unbound DNS
-- Pi-hole web UI bound to the LAN address
-- nftables WAN hardening
-- LAN-to-WAN NAT
-- CAKE runtime installed and active
-- LilHouse telemetry timers active
-- guarded live chain completion
-- rollback guard/cancel path
-- alpha readiness checker returning ok=true
+After install, client devices should receive an IP address from the LilHouse LAN range and use the LilHouse router as gateway and DNS.
 
-## Default security posture
+## Hardware needed
 
-The default appliance firewall posture is:
+Minimum test setup:
 
-- WAN inbound policy: drop
-- LAN interface: trusted/admin side
-- LAN-to-WAN forwarding: allowed
-- NAT masquerade: enabled
-- WAN admin ports: not explicitly allowed
-- Pi-hole web: LAN-bound, not wildcard web exposed
+* Fresh Debian install
+* Two wired network interfaces
+* One interface connected to upstream internet
+* One interface connected to a LAN device, switch, or access point
 
-SSH from the WAN side is intentionally not enabled by default.
+Typical examples:
 
-## Important warning
+* Raspberry Pi 5 with built-in Ethernet plus USB Ethernet
+* Small Debian mini PC with two Ethernet ports
+* Disposable Debian VM for testing
 
-This is alpha software. Test it first on a disposable VM, spare PC, or fresh Debian test router.
+## Quick start
 
-The installer changes network configuration, DNS, DHCP, firewall rules, NAT, and routing on the target machine.
-
-Do not run it on your current live router unless you are intentionally replacing that router and are prepared to recover or reinstall it.
-
-## Quick alpha install test
-
-On a disposable Debian VM:
-
-    ./easy-install.sh
-
-Choose:
-
-    2) Full throwaway VM install test
-
-Typical VM answers:
-
-    WAN interface [eth0]:
-    LAN interface [eth1]:
-    Configure mobile push alerts now? [no]:
-    Continue and install into / on this disposable VM? [no]: yes
-
-After install:
-
-    ./bin/lilhouse-router-appliance-prep-report --report /tmp/lilhouse-first-install/vm-live-install-report.json --wan eth0 --lan eth1
-    ./bin/lilhouse-router-alpha-readiness --report /tmp/lilhouse-first-install/vm-live-install-report.json
-
-Expected alpha result:
-
-    failure_count=0
-    failures=[]
-    ok=true
-    status=alpha-ready
-
-## Key scripts
-
-- easy-install.sh — first-run installer / VM test entrypoint
-- bin/lilhouse-router-appliance-install — installs the required appliance stack
-- bin/lilhouse-router-appliance-uninstall — throwaway VM reset/uninstall helper
-- bin/lilhouse-router-appliance-prep-report — runtime appliance proof report
-- bin/lilhouse-router-alpha-readiness — alpha readiness checker
-- bin/lilhouse-router-live-orchestrator — guarded live chain executor
-- scripts/audit-secrets.sh — repo safety/secret/risky-pattern audit
-- tests/smoke-test.sh — broad repo smoke test
-
-## Storage safety and history retention
-
-LilHouse is designed to run continuously without silently growing logs forever or deleting useful history.
-
-The storage model is lossless by default:
-
-- current state stays readable as plain JSON
-- active ledgers are preserved
-- cleanup starts as dry-run planning
-- archive actions are indexed
-- archive execution preserves originals
-- compressed archives are verified with SHA256
-- active ledger checkpointing is dry-run only
-
-Useful commands:
-
-    sudo lilhouse-storage-status
-    sudo lilhouse-storage-clean --dry-run
-    sudo lilhouse-storage-index --dry-run
-    sudo lilhouse-storage-index --write-index --yes
-    sudo lilhouse-storage-archive --dry-run
-    sudo lilhouse-storage-archive --execute --yes
-    sudo lilhouse-storage-ledger-checkpoint --dry-run
-    sudo lilhouse-storage-query --list
-    sudo lilhouse-storage-query --path events --show --lines 40
-    sudo lilhouse-storage-summary --dry-run
-    sudo lilhouse-storage-maintenance --dry-run
-    lilhouse-agent-readiness --check
-    lilhouse-agent-status --json
-
-Current alpha archive execution is intentionally narrow. It only compresses/copies logs and old JSON reports. It does not delete originals, truncate active ledgers, archive active ledgers, modify config, or clean arbitrary system files. Ledger checkpointing is dry-run planning only. Read-only storage query can inspect hot and indexed history. Query preview is read-only and line-limited. Storage summaries are additive memory maps and do not replace raw history. Storage maintenance planning is dry-run only. Agent readiness defines the future-agent safety contract. Agent status gives future agents one compact read-only status report.
-
-The goal is to keep router telemetry useful for agents over time without letting storage growth become a hidden problem.
-
-## Development checks
-
-Before committing:
-
-    ./tests/smoke-test.sh
-    ./scripts/audit-secrets.sh
-
-Both should pass.
-
-## Known limitations
-
-This alpha is not yet a one-click production router installer.
-
-Known limitations:
-
-- real-router live apply remains intentionally restricted
-- WAN SSH is blocked by default
-- no public alpha helper opens WAN SSH
-- dynamic CAKE tuning is not yet part of the alpha installer path
-- full recovery/rollback has been VM-proven, but not production-certified
-- UI/dashboard polish is not part of alpha scope yet
-- docs are still being expanded
-
-## Version milestone
-
-The core appliance alpha path was proven at:
-
-    v0.2.96-live-preview-networkd-forwarding
-
-Next presentation milestone:
-
-    v0.3.0-alpha
-
-## Public alpha quickstart
-
-LilHouse Agentic Router is currently a public alpha for fresh Debian test routers, spare machines, or disposable VMs. Do not run the full router installer on a production router unless you are prepared for network interruption and have a recovery path.
-
-### Fresh install
+Clone the repo:
 
 ```bash
 git clone https://github.com/LilHouseAgentic/lilhouse-agentic-router.git
 cd lilhouse-agentic-router
+```
+
+Run the installer:
+
+```bash
 ./easy-install.sh
 ```
 
-The easy installer will guide you through:
+The installer will guide you through:
 
-- install mode
-- WAN/LAN interface selection
-- WAN/LAN subnet conflict detection
-- CAKE/SQM profile selection
-- final router health checks
+* install mode
+* WAN/LAN interface selection
+* LAN subnet selection
+* DHCP range
+* CAKE/SQM profile
+* mobile alert choice
+* final install plan
+* post-install health checks
 
-### After install
+## Default network
 
-Check router health:
+Default LilHouse LAN:
 
-```bash
-sudo lilhouse-router-status
+```text
+Gateway/DNS:  192.168.2.1
+Subnet:       192.168.2.0/24
+DHCP range:   192.168.2.100-192.168.2.200
 ```
 
-Change CAKE/SQM speeds later without reinstalling:
+If the upstream/WAN network already uses `192.168.2.0/24`, the installer can choose a safer alternate LAN such as:
+
+```text
+Gateway/DNS:  192.168.50.1
+Subnet:       192.168.50.0/24
+DHCP range:   192.168.50.100-192.168.50.200
+```
+
+This avoids WAN/LAN subnet overlap, which is a common cause of broken routing.
+
+## CAKE/SQM profiles
+
+The installer currently offers:
+
+* Conservative: `100mbit` down / `20mbit` up
+* Fast: `300mbit` down / `40mbit` up
+* Satellite / variable: `150mbit` down / `20mbit` up
+* Custom: user-provided download/upload values
+
+After install, CAKE rates can be changed without reinstalling:
 
 ```bash
 sudo lilhouse-cake-set --down 220 --up 30
 ```
 
-Use a preset CAKE profile:
+Or with a preset:
 
 ```bash
 sudo lilhouse-cake-set --profile conservative
@@ -203,45 +132,109 @@ sudo lilhouse-cake-set --profile fast
 sudo lilhouse-cake-set --profile satellite
 ```
 
-### CAKE/SQM profiles
+## After install
 
-The installer currently offers:
-
-- Conservative: `100mbit` down / `20mbit` up
-- Fast: `300mbit` down / `40mbit` up
-- Satellite / variable: `150mbit` down / `20mbit` up
-- Custom: user-provided download/upload values
-
-### WAN/LAN subnet conflict protection
-
-The default LilHouse LAN is:
-
-```text
-192.168.2.1/24
-DHCP: 192.168.2.100-192.168.2.200
-```
-
-If the upstream WAN network overlaps the default LilHouse LAN, the installer warns you and offers a safer alternate LAN such as:
-
-```text
-192.168.50.1/24
-DHCP: 192.168.50.100-192.168.50.200
-```
-
-This helps avoid broken routing when the upstream modem/router is already using the same subnet.
-
-### Useful commands
+Check router health:
 
 ```bash
 sudo lilhouse-router-status
-sudo lilhouse-cake-set --down 220 --up 30
-sudo systemctl status lilhouse-cake.service --no-pager
-sudo systemctl status pihole-FTL --no-pager
-sudo systemctl status unbound --no-pager
 ```
 
-### Current alpha scope
+Check whether the LAN/client side is ready:
 
-The `v0.3.x` series focuses on safe installation, router defaults, status reporting, manual CAKE tuning, and public-alpha usability.
+```bash
+sudo lilhouse-client-readiness
+```
 
-Automatic self-healing, speedtest-based CAKE tuning, push alerts, and read-only router diagnosis are planned for later alpha releases.
+Expected fresh-install result before a LAN client is plugged in:
+
+```text
+Status: client-ready-waiting-for-device
+Notes: router side looks ready; waiting for a LAN device lease
+```
+
+After a LAN device receives DHCP, the status should become:
+
+```text
+Status: client-ready-with-lease
+```
+
+Check the read-only agent status report:
+
+```bash
+lilhouse-agent-status
+```
+
+## Useful commands
+
+```bash
+sudo lilhouse-router-status
+sudo lilhouse-client-readiness
+sudo lilhouse-cake-set --down 220 --up 30
+sudo lilhouse-storage-status
+sudo lilhouse-storage-maintenance --dry-run
+lilhouse-agent-readiness --check
+lilhouse-agent-status
+```
+
+## Safety model
+
+LilHouse is alpha software, but the install path is designed to be explicit and reviewable.
+
+The installer shows a plan before applying changes. It configures router services only after confirmation.
+
+Default security posture:
+
+* WAN inbound traffic is blocked by default
+* LAN side is trusted/admin side
+* LAN-to-WAN forwarding is allowed
+* NAT masquerade is enabled
+* Pi-hole web UI is bound to the LAN side
+* WAN SSH is not opened by default
+
+Agent-related tools are currently read-only status/readiness helpers. They do not autonomously change router settings.
+
+## Current alpha scope
+
+Current alpha focus:
+
+* Fresh Debian router install
+* Pi-hole + Unbound DNS/DHCP
+* nftables firewall/NAT
+* CAKE/SQM setup and manual tuning
+* WAN/LAN subnet conflict protection
+* router health checks
+* client readiness checks
+* storage safety tools
+* read-only agent readiness/status foundation
+* installer polish for public testing
+
+Not yet included:
+
+* automatic agent-driven router changes
+* dynamic CAKE speed tuning
+* production-certified rollback
+* polished web UI/dashboard
+* WAN SSH helper
+
+## Documentation
+
+Start here:
+
+* [Fresh install guide](docs/FRESH-INSTALL.md)
+* [Safety model](docs/safety-model.md)
+* [Architecture](docs/architecture.md)
+* [Storage policy](docs/storage-policy.md)
+* [Agent operating model](docs/agent-operating-model.md)
+* [Roadmap](docs/roadmap.md)
+
+## Development checks
+
+Before committing:
+
+```bash
+tests/smoke-test.sh
+scripts/audit-secrets.sh
+```
+
+Both should pass.
