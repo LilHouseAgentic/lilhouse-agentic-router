@@ -1,0 +1,240 @@
+#!/usr/bin/env bash
+set -u
+
+ROUTER_ENV="${LILHOUSE_ROUTER_ENV:-/etc/lilhouse/router.env}"
+HAVE_ROUTER_ENV=0
+if [ -f "$ROUTER_ENV" ]; then
+  HAVE_ROUTER_ENV=1
+  # shellcheck disable=SC1090
+  . "$ROUTER_ENV"
+fi
+
+LAN_IF="${LILHOUSE_LAN_IF:-eth1}"
+LAN_IP="${LILHOUSE_LAN_IP:-192.168.2.1}"
+LAN_NET="${LILHOUSE_LAN_NET:-192.168.2.0/24}"
+DHCP_START="${LILHOUSE_DHCP_START:-192.168.2.100}"
+DHCP_END="${LILHOUSE_DHCP_END:-192.168.2.200}"
+LEASE_FILE="${LILHOUSE_DHCP_LEASE_FILE:-/etc/pihole/dhcp.leases}"
+
+FAIL=0
+WARN=0
+
+ok() {
+  echo "  ✓ $1"
+}
+
+bad() {
+  echo "  ✗ $1"
+  FAIL=1
+}
+
+warn() {
+  echo "  ! $1"
+  WARN=1
+}
+
+have_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+is_active() {
+  systemctl is-active --quiet "$1" 2>/dev/null
+}
+
+echo
+echo "======================================"
+echo " LilHouse Client Readiness"
+echo "======================================"
+echo
+echo "Expected client settings:"
+echo "  LAN interface: $LAN_IF"
+echo "  subnet:        $LAN_NET"
+echo "  gateway:       $LAN_IP"
+echo "  DNS:           $LAN_IP"
+echo "  DHCP range:    $DHCP_START-$DHCP_END"
+echo
+
+echo "Router path:"
+if ip route show default 2>/dev/null | grep -q '^default '; then
+  ok "WAN default route present"
+else
+  bad "WAN default route missing"
+fi
+
+if ip -br addr show dev "$LAN_IF" 2>/dev/null | grep -q "$LAN_IP"; then
+  ok "LAN gateway address present on $LAN_IF"
+else
+  bad "LAN gateway address missing on $LAN_IF"
+fi
+
+if ip route show "$LAN_NET" 2>/dev/null | grep -q "$LAN_IF"; then
+  ok "LAN route present for $LAN_NET via $LAN_IF"
+else
+  warn "LAN route for $LAN_NET not clearly visible via $LAN_IF"
+fi
+
+echo
+echo "DHCP readiness:"
+if have_cmd pihole-FTL; then
+  dhcp_active="$(pihole-FTL --config dhcp.active 2>/dev/null || true)"
+  dhcp_start="$(pihole-FTL --config dhcp.start 2>/dev/null || true)"
+  dhcp_end="$(pihole-FTL --config dhcp.end 2>/dev/null || true)"
+  dhcp_router="$(pihole-FTL --config dhcp.router 2>/dev/null || true)"
+
+  if [ "$dhcp_active" = "true" ]; then
+    ok "Pi-hole DHCP active"
+  else
+    bad "Pi-hole DHCP not active"
+  fi
+
+  if [ "$dhcp_start" = "$DHCP_START" ] && [ "$dhcp_end" = "$DHCP_END" ]; then
+    ok "DHCP range matches expected range"
+  else
+    if [ "$HAVE_ROUTER_ENV" -eq 1 ]; then
+      bad "DHCP range is $dhcp_start-$dhcp_end, expected $DHCP_START-$DHCP_END"
+    else
+      warn "DHCP range is $dhcp_start-$dhcp_end; no router env found, so defaults may not match this machine"
+    fi
+  fi
+
+  if [ "$dhcp_router" = "$LAN_IP" ]; then
+    ok "DHCP advertises router $LAN_IP"
+  else
+    bad "DHCP router is $dhcp_router, expected $LAN_IP"
+  fi
+else
+  bad "pihole-FTL command missing"
+fi
+
+if ss -lunp 2>/dev/null | grep -q ':67'; then
+  ok "DHCP listener on UDP :67"
+else
+  bad "DHCP listener on UDP :67 missing"
+fi
+
+echo
+echo "DNS readiness:"
+if is_active pihole-FTL; then
+  ok "Pi-hole FTL active"
+else
+  bad "Pi-hole FTL not active"
+fi
+
+if is_active unbound; then
+  ok "Unbound active"
+else
+  bad "Unbound not active"
+fi
+
+if have_cmd dig; then
+  if dig +time=2 +tries=1 @"$LAN_IP" example.com A +short >/dev/null 2>&1; then
+    ok "DNS responds on client DNS address $LAN_IP"
+  else
+    warn "DNS did not answer on $LAN_IP from the router itself"
+  fi
+else
+  warn "dig command missing; DNS client-address test skipped"
+fi
+
+echo
+echo "Internet sharing readiness:"
+if [ "$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo 0)" = "1" ]; then
+  ok "IPv4 forwarding enabled"
+else
+  bad "IPv4 forwarding disabled"
+fi
+
+NFT_CMD=nft
+if have_cmd "$NFT_CMD"; then
+  nft_rules="$("$NFT_CMD" list ruleset 2>/dev/null || true)"
+  if [ -z "$nft_rules" ]; then
+    warn "firewall ruleset not readable or empty; run with sudo to verify NAT masquerade"
+  elif printf "%s\n" "$nft_rules" | awk -v net="$LAN_NET" 'index($0, net) && /masquerade/ {found=1} END{exit !found}'; then
+    ok "NAT masquerade active for $LAN_NET"
+  else
+    if [ "$HAVE_ROUTER_ENV" -eq 1 ]; then
+      bad "NAT masquerade missing for $LAN_NET"
+    else
+      warn "NAT masquerade missing for $LAN_NET; no router env found, so defaults may not match this machine"
+    fi
+  fi
+else
+  bad "firewall command missing"
+fi
+
+echo
+echo "Observed LAN clients:"
+lease_count=0
+if [ -f "$LEASE_FILE" ] && [ ! -r "$LEASE_FILE" ]; then
+  warn "DHCP lease file exists but is not readable: $LEASE_FILE"
+  warn "Run with sudo to inspect observed LAN client leases"
+elif [ -f "$LEASE_FILE" ]; then
+  lease_tmp="$(mktemp /tmp/lilhouse-client-readiness-leases.XXXXXX 2>/dev/null || true)"
+  if [ -z "$lease_tmp" ]; then
+    warn "Could not create temporary lease inspection file"
+    lease_count=0
+  else
+    lease_count="$(python3 - "$LEASE_FILE" "$LAN_NET" <<'PY'
+import ipaddress
+import sys
+
+lease_file = sys.argv[1]
+lan = ipaddress.ip_network(sys.argv[2], strict=False)
+count = 0
+
+try:
+    lines = open(lease_file, "r", encoding="utf-8", errors="replace").read().splitlines()
+except Exception:
+    lines = []
+
+for line in lines:
+    parts = line.split()
+    if len(parts) < 3:
+        continue
+    try:
+        ip = ipaddress.ip_address(parts[2])
+    except ValueError:
+        continue
+    if ip in lan:
+        count += 1
+        host = parts[3] if len(parts) >= 4 else "*"
+        mac = parts[1] if len(parts) >= 2 else "*"
+        print(f"  lease: {ip}  host={host}  mac={mac}", file=sys.stderr)
+
+print(count)
+PY
+)" 2>"$lease_tmp" || lease_count=0
+
+    if [ -s "$lease_tmp" ]; then
+      cat "$lease_tmp"
+    fi
+    rm -f "$lease_tmp"
+  fi
+
+  if [ "${lease_count:-0}" -gt 0 ]; then
+    ok "LAN DHCP lease(s) seen: $lease_count"
+  else
+    warn "No LAN DHCP leases seen yet"
+  fi
+else
+  warn "DHCP lease file not found: $LEASE_FILE"
+fi
+
+echo
+echo "Client result:"
+if [ "$FAIL" -eq 0 ]; then
+  if [ "${lease_count:-0}" -gt 0 ]; then
+    echo "  Status: client-ready-with-lease"
+  else
+    echo "  Status: client-ready-waiting-for-device"
+  fi
+
+  if [ "$WARN" -gt 0 ]; then
+    echo "  Notes: warnings present, but no hard blocker found"
+  fi
+
+  exit 0
+else
+  echo "  Status: not-client-ready"
+  exit 1
+fi

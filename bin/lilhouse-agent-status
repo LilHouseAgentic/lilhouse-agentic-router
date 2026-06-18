@@ -186,6 +186,7 @@ def build_report(args):
             "sudo lilhouse-storage-summary --dry-run",
             "sudo lilhouse-storage-query --path <term> --show --lines 40",
             "sudo lilhouse-router-status",
+            "sudo lilhouse-client-readiness",
         ],
         "stages": stages,
     }

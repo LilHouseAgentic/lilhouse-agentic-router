@@ -67,6 +67,7 @@ BUILTIN_POLICY = {
         "lilhouse-current-state",
         "lilhouse-status",
         "lilhouse-router-status",
+        "lilhouse-client-readiness",
         "lilhouse-storage-status",
         "lilhouse-storage-clean",
         "lilhouse-storage-index",
