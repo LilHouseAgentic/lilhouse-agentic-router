@@ -144,10 +144,11 @@ else
   bad "IPv4 forwarding disabled"
 fi
 
-if have_cmd nft; then
-  nft_rules="$(nft list ruleset 2>/dev/null || true)"
+NFT_CMD=nft
+if have_cmd "$NFT_CMD"; then
+  nft_rules="$("$NFT_CMD" list ruleset 2>/dev/null || true)"
   if [ -z "$nft_rules" ]; then
-    warn "nft ruleset not readable or empty; run with sudo to verify NAT masquerade"
+    warn "firewall ruleset not readable or empty; run with sudo to verify NAT masquerade"
   elif printf "%s\n" "$nft_rules" | awk -v net="$LAN_NET" 'index($0, net) && /masquerade/ {found=1} END{exit !found}'; then
     ok "NAT masquerade active for $LAN_NET"
   else
@@ -158,7 +159,7 @@ if have_cmd nft; then
     fi
   fi
 else
-  bad "nft command missing"
+  bad "firewall command missing"
 fi
 
 echo
