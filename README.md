@@ -163,6 +163,7 @@ Check the read-only agent status report:
 
 ```bash
 lilhouse-agent-status
+lilhouse-agent-propose
 ```
 
 ## Useful commands

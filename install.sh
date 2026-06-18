@@ -235,6 +235,7 @@ backup_existing /usr/local/bin/lilhouse-storage-summary
 backup_existing /usr/local/bin/lilhouse-storage-maintenance
 backup_existing /usr/local/bin/lilhouse-agent-readiness
 backup_existing /usr/local/bin/lilhouse-agent-status
+backup_existing /usr/local/bin/lilhouse-agent-propose
 backup_existing /usr/local/bin/lilhouse-interface-report
 backup_existing /usr/local/bin/lilhouse-router-plan
 backup_existing /usr/local/bin/lilhouse-router-plan-summary
@@ -311,6 +312,7 @@ install -m 0755 "$REPO_DIR/bin/lilhouse-storage-summary" "$(root_path /usr/local
 install -m 0755 "$REPO_DIR/bin/lilhouse-storage-maintenance" "$(root_path /usr/local/bin/lilhouse-storage-maintenance)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-agent-readiness" "$(root_path /usr/local/bin/lilhouse-agent-readiness)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-agent-status" "$(root_path /usr/local/bin/lilhouse-agent-status)"
+install -m 0755 "$REPO_DIR/bin/lilhouse-agent-propose" "$(root_path /usr/local/bin/lilhouse-agent-propose)"
 install -m 0644 "$REPO_DIR/config/lilhouse-agent-policy.example.json" "$(root_path /etc/lilhouse/agent-policy.example.json)"
 if [ ! -f "$(root_path /etc/lilhouse/agent-policy.json)" ]; then
   install -m 0644 "$REPO_DIR/config/lilhouse-agent-policy.example.json" "$(root_path /etc/lilhouse/agent-policy.json)"
@@ -401,6 +403,7 @@ echo "  sudo lilhouse-storage-summary --dry-run"
 echo "  sudo lilhouse-storage-maintenance --dry-run"
 echo "  lilhouse-agent-readiness --check"
 echo "  lilhouse-agent-status --json"
+echo "  lilhouse-agent-propose --json"
 echo "  lilhouse-router-status"
 echo "  sudo lilhouse-client-readiness"
 echo "  sudo lilhouse-router-doctor"

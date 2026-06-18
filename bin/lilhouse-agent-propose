@@ -1,0 +1,302 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import shutil
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+
+SCHEMA = "lilhouse.agent_proposal.v1"
+
+
+def now_iso():
+    return datetime.now(timezone.utc).astimezone().isoformat()
+
+
+def sibling_or_path(name):
+    here = Path(__file__).resolve().parent
+    candidate = here / name
+    if candidate.exists() and os.access(candidate, os.X_OK):
+        return str(candidate), "sibling_bin"
+    found = shutil.which(name)
+    if found:
+        return found, "path"
+    return name, "missing"
+
+
+def run_json(command_name, args, timeout=60):
+    cmd, source = sibling_or_path(command_name)
+    result = {
+        "command": [command_name] + args,
+        "resolved_command": [cmd] + args,
+        "source": source,
+        "ok": False,
+        "returncode": None,
+        "json": None,
+        "stdout_excerpt": "",
+        "stderr_excerpt": "",
+    }
+
+    if source == "missing":
+        result["returncode"] = 127
+        result["stderr_excerpt"] = f"missing command: {command_name}"
+        return result
+
+    try:
+        p = subprocess.run(
+            [cmd] + args,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as e:
+        result["returncode"] = 124
+        result["stdout_excerpt"] = (e.stdout or "")[-2000:]
+        result["stderr_excerpt"] = (e.stderr or "")[-2000:]
+        return result
+
+    result["returncode"] = p.returncode
+    result["stdout_excerpt"] = (p.stdout or "")[-2000:]
+    result["stderr_excerpt"] = (p.stderr or "")[-2000:]
+
+    try:
+        result["json"] = json.loads(p.stdout)
+        result["ok"] = True
+    except Exception:
+        result["ok"] = False
+
+    return result
+
+
+def first_readiness_json(agent_status):
+    if not isinstance(agent_status, dict):
+        return {}
+    for stage in agent_status.get("stages", []):
+        if stage.get("stage") == "agent_readiness" and isinstance(stage.get("json"), dict):
+            return stage["json"]
+    return {}
+
+
+def flatten_doctor_findings(doctor):
+    findings = []
+    if not isinstance(doctor, dict):
+        return findings
+    for stage in doctor.get("stages", []):
+        for finding in stage.get("findings", []) or []:
+            findings.append({
+                "stage": stage.get("stage"),
+                "finding": finding,
+                "status": stage.get("doctor_status"),
+            })
+    return findings
+
+
+def add_proposal(proposals, category, severity, summary, evidence, next_commands, approval_required=True):
+    proposals.append({
+        "category": category,
+        "severity": severity,
+        "summary": summary,
+        "evidence": evidence,
+        "suggested_next_commands": next_commands,
+        "agent_may_execute": False,
+        "operator_approval_required_for_changes": approval_required,
+    })
+
+
+def build_proposals(doctor, readiness):
+    findings = flatten_doctor_findings(doctor)
+    text = "\n".join(f["finding"] for f in findings).lower()
+    proposals = []
+
+    if "nat masquerade missing" in text:
+        add_proposal(
+            proposals,
+            "routing_firewall",
+            "high",
+            "Investigate NAT masquerade before assuming LAN clients have internet sharing.",
+            ["router doctor reported NAT masquerade missing"],
+            ["sudo lilhouse-router-status", "sudo lilhouse-client-readiness"],
+            True,
+        )
+
+    if "dhcp range" in text:
+        add_proposal(
+            proposals,
+            "dhcp",
+            "medium",
+            "Review DHCP range mismatch between expected profile and observed Pi-hole DHCP range.",
+            [f["finding"] for f in findings if "DHCP range" in f["finding"] or "dhcp range" in f["finding"].lower()],
+            ["sudo lilhouse-client-readiness", "sudo lilhouse-router-status"],
+            True,
+        )
+
+    if "cake config file missing" in text:
+        add_proposal(
+            proposals,
+            "sqm_cake",
+            "medium",
+            "Review CAKE config file state; CAKE qdisc may be active but config persistence is unclear.",
+            ["router doctor reported CAKE config file missing"],
+            ["sudo lilhouse-router-status"],
+            True,
+        )
+
+    if "storage-health timer not active" in text:
+        add_proposal(
+            proposals,
+            "telemetry_storage",
+            "medium",
+            "Check storage-health timer so router health telemetry remains fresh.",
+            ["router doctor reported storage-health timer not active"],
+            ["systemctl status lilhouse-storage-health.timer --no-pager"],
+            True,
+        )
+
+    if "run with sudo" in text or "not readable" in text:
+        add_proposal(
+            proposals,
+            "diagnostic_privilege",
+            "low",
+            "Re-run diagnosis with sudo for complete NAT and DHCP lease visibility.",
+            [f["finding"] for f in findings if "sudo" in f["finding"].lower() or "not readable" in f["finding"].lower()],
+            ["sudo lilhouse-router-doctor", "sudo lilhouse-client-readiness"],
+            False,
+        )
+
+    if not proposals:
+        add_proposal(
+            proposals,
+            "observe",
+            "info",
+            "No concrete router issue proposal was generated from the current doctor findings.",
+            [],
+            ["lilhouse-router-doctor --json"],
+            False,
+        )
+
+    return proposals
+
+
+def decide_class(doctor, proposals, readiness):
+    overall = (doctor or {}).get("overall_status", "UNKNOWN")
+    forbidden = readiness.get("command_tiers", {}).get("forbidden_for_agents", [])
+
+    if not isinstance(doctor, dict):
+        return "blocked", "router doctor JSON unavailable"
+
+    if overall == "FAIL":
+        return "alert", "router doctor reported FAIL"
+
+    if any(p["severity"] == "high" for p in proposals):
+        return "propose", "high-severity proposal present but execution is not allowed"
+
+    if overall in ("WARN", "WAIT"):
+        return "propose", f"router doctor reported {overall}"
+
+    if forbidden:
+        return "observe", "router appears OK and safety policy is loaded"
+
+    return "observe", "router appears OK"
+
+
+def print_human(report):
+    print()
+    print("======================================")
+    print(" LilHouse Agent Proposal")
+    print("======================================")
+    print()
+    print("Safety:")
+    print("  mode: read-only proposal")
+    print("  writes files: no")
+    print("  changes router settings: no")
+    print("  agent may execute changes: no")
+    print()
+    print(f"Decision: {report['decision_class'].upper()}")
+    print(f"Reason:   {report['decision_reason']}")
+    print()
+
+    print("Router diagnosis:")
+    print(f"  overall: {report['router_doctor_summary'].get('overall_status')}")
+    print(f"  root:    {report['router_doctor_summary'].get('running_as_root')}")
+    print()
+
+    print("Proposals:")
+    for p in report["proposals"]:
+        print(f"  - [{p['severity']}] {p['category']}: {p['summary']}")
+        if p["suggested_next_commands"]:
+            print("    next:")
+            for cmd in p["suggested_next_commands"]:
+                print(f"      {cmd}")
+
+    print()
+    print("Boundaries:")
+    print("  Agent must not execute router-impacting changes directly.")
+    print("  Router-impacting changes require guarded commands and operator approval.")
+    print("  Use --json for agent-readable output.")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Read-only LilHouse agent proposal layer.")
+    ap.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    ap.add_argument("--lines", type=int, default=20, help="Router doctor excerpt lines.")
+    args = ap.parse_args()
+
+    doctor_run = run_json("lilhouse-router-doctor", ["--json", "--lines", str(args.lines)])
+    agent_run = run_json("lilhouse-agent-status", ["--json"])
+
+    doctor = doctor_run.get("json") if doctor_run.get("ok") else {}
+    agent_status = agent_run.get("json") if agent_run.get("ok") else {}
+    readiness = first_readiness_json(agent_status)
+
+    proposals = build_proposals(doctor, readiness)
+    decision_class, decision_reason = decide_class(doctor, proposals, readiness)
+
+    report = {
+        "schema": SCHEMA,
+        "ts": now_iso(),
+        "mode": "read_only_agent_proposal",
+        "writes_files": False,
+        "executes_router_changes": False,
+        "agent_may_execute_changes": False,
+        "operator_approval_required_for_router_changes": True,
+        "decision_class": decision_class,
+        "decision_reason": decision_reason,
+        "router_doctor_summary": {
+            "overall_status": doctor.get("overall_status"),
+            "running_as_root": doctor.get("running_as_root"),
+            "stage_count": len(doctor.get("stages", [])) if isinstance(doctor, dict) else 0,
+        },
+        "agent_policy_summary": {
+            "policy_loaded": bool(readiness),
+            "decision_classes": readiness.get("decision_classes", {}),
+            "command_tiers": readiness.get("command_tiers", {}),
+            "forbidden_for_agents": readiness.get("command_tiers", {}).get("forbidden_for_agents", []),
+        },
+        "proposals": proposals,
+        "inputs": {
+            "router_doctor": {
+                "ok": doctor_run.get("ok"),
+                "returncode": doctor_run.get("returncode"),
+                "stderr_excerpt": doctor_run.get("stderr_excerpt"),
+            },
+            "agent_status": {
+                "ok": agent_run.get("ok"),
+                "returncode": agent_run.get("returncode"),
+                "stderr_excerpt": agent_run.get("stderr_excerpt"),
+            },
+        },
+    }
+
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print_human(report)
+
+    return 0 if decision_class != "blocked" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
