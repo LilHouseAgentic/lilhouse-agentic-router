@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import json
 import os
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -202,6 +204,38 @@ def decide_class(doctor, proposals, readiness):
     return "observe", "router appears OK"
 
 
+
+def proposal_record(report):
+    stable = {
+        "decision_class": report.get("decision_class"),
+        "decision_reason": report.get("decision_reason"),
+        "router_doctor_summary": report.get("router_doctor_summary"),
+        "proposals": report.get("proposals", []),
+    }
+    digest = hashlib.sha256(json.dumps(stable, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+    return {
+        "schema": "lilhouse.agent_proposal_record.v1",
+        "proposal_id": digest,
+        "ts": now_iso(),
+        "source": "lilhouse-agent-propose",
+        "decision_class": report.get("decision_class"),
+        "decision_reason": report.get("decision_reason"),
+        "proposal_count": len(report.get("proposals", [])),
+        "router_overall_status": report.get("router_doctor_summary", {}).get("overall_status"),
+        "agent_may_execute_changes": False,
+        "operator_approval_required_for_router_changes": True,
+        "report": report,
+    }
+
+
+def append_jsonl(path, record):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n")
+    return path
+
+
 def print_human(report):
     print()
     print("======================================")
@@ -242,7 +276,16 @@ def main():
     ap = argparse.ArgumentParser(description="Read-only LilHouse agent proposal layer.")
     ap.add_argument("--json", action="store_true", help="Emit structured JSON.")
     ap.add_argument("--lines", type=int, default=20, help="Router doctor excerpt lines.")
+    ap.add_argument("--write-proposal", action="store_true", help="Append proposal record to proposals.jsonl.")
+    ap.add_argument("--yes", action="store_true", help="Required with --write-proposal.")
+    ap.add_argument("--state-dir", default=os.environ.get("LILHOUSE_STATE_DIR", "/var/lib/lilhouse"), help="State directory for proposals.jsonl.")
+    ap.add_argument("--proposals-file", default=os.environ.get("LILHOUSE_PROPOSALS_FILE"), help="Override proposal ledger path.")
     args = ap.parse_args()
+
+    if args.write_proposal and not args.yes:
+        print("ERROR: refusing to write proposal ledger without --yes", file=sys.stderr)
+        print("Try: lilhouse-agent-propose --write-proposal --yes", file=sys.stderr)
+        return 2
 
     doctor_run = run_json("lilhouse-router-doctor", ["--json", "--lines", str(args.lines)])
     agent_run = run_json("lilhouse-agent-status", ["--json"])
@@ -288,7 +331,25 @@ def main():
                 "stderr_excerpt": agent_run.get("stderr_excerpt"),
             },
         },
+        "proposal_write": {
+            "requested": bool(args.write_proposal),
+            "written": False,
+            "path": None,
+            "proposal_id": None,
+        },
     }
+
+    if args.write_proposal:
+        out_path = args.proposals_file or str(Path(args.state_dir) / "proposals.jsonl")
+        record = proposal_record(report)
+        written_path = append_jsonl(out_path, record)
+        report["writes_files"] = True
+        report["proposal_write"] = {
+            "requested": True,
+            "written": True,
+            "path": str(written_path),
+            "proposal_id": record["proposal_id"],
+        }
 
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))

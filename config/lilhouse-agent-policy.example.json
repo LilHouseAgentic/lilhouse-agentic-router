@@ -50,7 +50,8 @@
     ],
     "additive_write_requires_yes": [
       "lilhouse-storage-index --write-index --yes",
-      "lilhouse-storage-summary --write-summary --yes"
+      "lilhouse-storage-summary --write-summary --yes",
+      "lilhouse-agent-propose --write-proposal --yes"
     ],
     "guarded_execute_requires_operator": [
       "lilhouse-storage-archive --execute --yes",

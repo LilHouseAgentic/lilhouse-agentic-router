@@ -164,6 +164,7 @@ Check the read-only agent status report:
 ```bash
 lilhouse-agent-status
 lilhouse-agent-propose
+sudo lilhouse-agent-propose --write-proposal --yes
 ```
 
 ## Useful commands
