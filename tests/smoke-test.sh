@@ -2093,7 +2093,7 @@ fi
 
 echo
 echo "== verify easy installer LAN subnet picker behavior =="
-sed -n "100,/^set_cake_profile_defaults()/p" easy-install.sh | sed "$d" > "$TMP_STATE/easy-install-lan-functions.sh"
+sed -n "100,/^set_cake_profile_defaults()/p" easy-install.sh | sed '$d' > "$TMP_STATE/easy-install-lan-functions.sh"
 . "$TMP_STATE/easy-install-lan-functions.sh"
 test "$(auto_lan_cidr "172.25.43.83/20")" = "192.168.2.1/24"
 test "$(auto_lan_cidr "192.168.2.55/24")" = "192.168.50.1/24"
