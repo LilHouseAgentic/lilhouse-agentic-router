@@ -57,3 +57,17 @@ A working install should give clients on the LAN side:
 - gateway 192.168.2.1
 - DNS 192.168.2.1
 - internet routed through the Debian router
+
+## LAN subnet picker
+
+The easy installer uses an Auto LAN subnet picker.
+
+Auto prefers:
+
+```text
+192.168.2.0/24
+```
+
+If the WAN/upstream network already overlaps that subnet, the installer automatically chooses another advertised `192.168.x.0/24` LAN subnet such as `192.168.50.0/24`.
+
+Only `192.168.x.0/24` choices are advertised in the interactive menu. Custom interactive choices must be `192.168.x.1/24` style gateway CIDRs.

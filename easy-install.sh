@@ -47,7 +47,7 @@ Options:
   --yes             Non-interactive confirmation
   --wan IFACE       WAN interface
   --lan IFACE       LAN interface
-  --lan-cidr CIDR   LAN gateway CIDR, default 192.168.2.1/24
+  --lan-cidr CIDR   LAN gateway CIDR, bypasses Auto LAN subnet picker
   --dhcp-start IP    DHCP start, default 192.168.2.100
   --dhcp-end IP      DHCP end, default 192.168.2.200
   --cake yes|no     Enable CAKE/SQM in generated plan
@@ -143,6 +143,121 @@ a = ipaddress.ip_interface(sys.argv[1]).network
 b = ipaddress.ip_interface(sys.argv[2]).network
 sys.exit(0 if a.overlaps(b) else 1)
 PY_NET
+}
+
+validate_192168_24_cidr() {
+  python3 - "$1" <<'PY_LAN_VALIDATE'
+import ipaddress
+import sys
+
+try:
+    iface = ipaddress.ip_interface(sys.argv[1])
+except Exception:
+    sys.exit(1)
+
+allowed = ipaddress.ip_network("192.168.0.0/16")
+if iface.version != 4:
+    sys.exit(1)
+if iface.network.prefixlen != 24:
+    sys.exit(1)
+if iface.ip not in allowed:
+    sys.exit(1)
+
+sys.exit(0)
+PY_LAN_VALIDATE
+}
+
+auto_lan_cidr() {
+  wan_cidr="$1"
+  for candidate in \
+    "192.168.2.1/24" \
+    "192.168.50.1/24" \
+    "192.168.88.1/24" \
+    "192.168.100.1/24" \
+    "192.168.10.1/24" \
+    "192.168.20.1/24"
+  do
+    if [ -z "$wan_cidr" ] || ! networks_overlap "$wan_cidr" "$candidate"; then
+      printf "%s" "$candidate"
+      return 0
+    fi
+  done
+
+  printf "%s" "192.168.50.1/24"
+}
+
+choose_lan_subnet_interactive() {
+  WAN_IPV4_CIDR="$(detect_wan_ipv4_cidr "$WAN" || true)"
+  auto_cidr="$(auto_lan_cidr "$WAN_IPV4_CIDR")"
+
+  while true; do
+    DHCP_START=""
+    DHCP_END=""
+
+    echo
+    echo "LAN subnet:"
+    if [ -n "$WAN_IPV4_CIDR" ]; then
+      echo "  detected WAN IPv4: $WAN_IPV4_CIDR"
+    else
+      echo "  detected WAN IPv4: unknown"
+    fi
+    echo "  auto choice:       $auto_cidr"
+    echo
+    echo "  1) Auto  [default]"
+    echo "     Prefer 192.168.2.0/24 unless WAN/upstream already uses it."
+    echo "  2) 192.168.2.1/24"
+    echo "  3) 192.168.50.1/24"
+    echo "  4) 192.168.88.1/24"
+    echo "  5) 192.168.100.1/24"
+    echo "  6) Custom 192.168.x.1/24"
+    echo
+
+    lan_choice="$(ask_default "Choose LAN subnet" "1")"
+
+    case "$lan_choice" in
+      ""|1)
+        set_lan_from_cidr "$auto_cidr"
+        ;;
+      2)
+        set_lan_from_cidr "192.168.2.1/24"
+        ;;
+      3)
+        set_lan_from_cidr "192.168.50.1/24"
+        ;;
+      4)
+        set_lan_from_cidr "192.168.88.1/24"
+        ;;
+      5)
+        set_lan_from_cidr "192.168.100.1/24"
+        ;;
+      6)
+        custom_lan="$(ask_default "Custom LAN gateway CIDR" "$auto_cidr")"
+        if ! validate_192168_24_cidr "$custom_lan"; then
+          echo
+          echo "ERROR: custom LAN must be a 192.168.x.1/24-style IPv4 CIDR."
+          echo "Example: 192.168.60.1/24"
+          continue
+        fi
+        set_lan_from_cidr "$custom_lan"
+        ;;
+      *)
+        echo "Unknown choice. Using Auto."
+        set_lan_from_cidr "$auto_cidr"
+        ;;
+    esac
+
+    if [ -n "$WAN_IPV4_CIDR" ] && networks_overlap "$WAN_IPV4_CIDR" "$LAN_CIDR"; then
+      echo
+      echo "ERROR: WAN/upstream and LAN overlap."
+      echo "  WAN/upstream: $WAN_IPV4_CIDR"
+      echo "  chosen LAN:   $LAN_NET"
+      echo
+      echo "Choose another 192.168.x.0/24 LAN subnet."
+      continue
+    fi
+
+    break
+  done
 }
 
 set_cake_profile_defaults() {
@@ -602,39 +717,21 @@ if [ "$WAN" = "$LAN" ]; then
   exit 2
 fi
 
-  set_lan_defaults
   WAN_IPV4_CIDR="$(detect_wan_ipv4_cidr "$WAN" || true)"
 
-  if [ -n "$WAN_IPV4_CIDR" ] && networks_overlap "$WAN_IPV4_CIDR" "$LAN_CIDR"; then
-    echo
-    echo "LAN subnet conflict detected."
-    echo "  WAN appears to be on: $WAN_IPV4_CIDR"
-    echo "  LilHouse default LAN: $LAN_NET"
-    echo
-    echo "Choose a different LilHouse LAN:"
-    echo "  1) 192.168.50.1/24  [recommended]"
-    echo "  2) 10.10.10.1/24"
-    echo "  3) Custom /24 gateway CIDR"
-    echo
-    lan_choice="$(ask_default "Choose LAN subnet" "1")"
-    DHCP_START=""
-    DHCP_END=""
-    case "$lan_choice" in
-      ""|1)
-        set_lan_from_cidr "192.168.50.1/24"
-        ;;
-      2)
-        set_lan_from_cidr "10.10.10.1/24"
-        ;;
-      3)
-        custom_lan="$(ask_default "Custom LAN gateway CIDR" "192.168.50.1/24")"
-        set_lan_from_cidr "$custom_lan"
-        ;;
-      *)
-        echo "Unknown choice. Using 192.168.50.1/24."
-        set_lan_from_cidr "192.168.50.1/24"
-        ;;
-    esac
+  if [ -n "$LAN_CIDR" ]; then
+    set_lan_defaults
+    if [ -n "$WAN_IPV4_CIDR" ] && networks_overlap "$WAN_IPV4_CIDR" "$LAN_CIDR"; then
+      echo
+      echo "ERROR: WAN/upstream and configured LAN overlap."
+      echo "  WAN/upstream: $WAN_IPV4_CIDR"
+      echo "  configured LAN: $LAN_NET"
+      echo
+      echo "Choose a different --lan-cidr."
+      exit 2
+    fi
+  else
+    choose_lan_subnet_interactive
   fi
 
   CAKE="yes"
