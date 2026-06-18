@@ -72,6 +72,7 @@ BUILTIN_POLICY = {
         "lilhouse-router-status",
         "lilhouse-router-doctor",
         "lilhouse-agent-propose",
+        "lilhouse-agent-proposal-review",
         "lilhouse-client-readiness",
         "lilhouse-storage-status",
         "lilhouse-storage-clean",

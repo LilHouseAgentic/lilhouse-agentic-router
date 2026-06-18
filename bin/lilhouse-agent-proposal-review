@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import sys
+from collections import Counter, defaultdict
+from datetime import datetime, timezone
+from pathlib import Path
+
+SCHEMA = "lilhouse.agent_proposal_review.v1"
+
+
+def now_iso():
+    return datetime.now(timezone.utc).astimezone().isoformat()
+
+
+def parse_ts(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except Exception:
+        return None
+
+
+def read_jsonl(path, limit=None):
+    path = Path(path)
+    records = []
+    errors = []
+
+    if not path.exists():
+        return records, errors, False
+
+    with open(path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    if limit is not None and limit > 0:
+        lines = lines[-limit:]
+
+    for idx, line in enumerate(lines, 1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            records.append(json.loads(line))
+        except Exception as exc:
+            errors.append({
+                "line": idx,
+                "error": str(exc),
+            })
+
+    return records, errors, True
+
+
+def proposal_categories(record):
+    report = record.get("report") if isinstance(record.get("report"), dict) else {}
+    proposals = report.get("proposals") if isinstance(report.get("proposals"), list) else []
+    cats = []
+    for item in proposals:
+        if isinstance(item, dict) and item.get("category"):
+            cats.append(item["category"])
+    return cats
+
+
+def review(records):
+    groups = defaultdict(list)
+    for rec in records:
+        proposal_id = rec.get("proposal_id") or "unknown"
+        groups[proposal_id].append(rec)
+
+    reviewed = []
+    for proposal_id, items in groups.items():
+        items_sorted = sorted(items, key=lambda r: str(r.get("ts", "")))
+        first = items_sorted[0]
+        last = items_sorted[-1]
+        category_counts = Counter()
+        decision_counts = Counter()
+
+        for item in items:
+            decision_counts[item.get("decision_class", "unknown")] += 1
+            for cat in proposal_categories(item):
+                category_counts[cat] += 1
+
+        first_ts = first.get("ts")
+        last_ts = last.get("ts")
+
+        reviewed.append({
+            "proposal_id": proposal_id,
+            "count": len(items),
+            "is_repeat": len(items) > 1,
+            "first_seen": first_ts,
+            "last_seen": last_ts,
+            "decision_class_counts": dict(decision_counts),
+            "category_counts": dict(category_counts),
+            "latest_decision_class": last.get("decision_class"),
+            "latest_router_overall_status": last.get("router_overall_status"),
+            "latest_summary": (
+                last.get("report", {})
+                    .get("proposals", [{}])[0]
+                    .get("summary")
+                if isinstance(last.get("report"), dict) and last.get("report", {}).get("proposals")
+                else None
+            ),
+        })
+
+    reviewed.sort(key=lambda x: (x["count"], str(x.get("last_seen") or "")), reverse=True)
+    return reviewed
+
+
+def review_class(groups):
+    if not groups:
+        return "observe", "no proposal records found"
+
+    repeated = [g for g in groups if g["is_repeat"]]
+    if repeated:
+        top = repeated[0]
+        return "review_repeated", f"proposal {top['proposal_id']} appears {top['count']} times"
+
+    return "review_active", f"{len(groups)} proposal group(s) found"
+
+
+def print_human(report):
+    print()
+    print("======================================")
+    print(" LilHouse Agent Proposal Review")
+    print("======================================")
+    print()
+    print("Safety:")
+    print("  mode: read-only proposal ledger review")
+    print("  writes files: no")
+    print("  changes router settings: no")
+    print("  agent may execute changes: no")
+    print()
+    print(f"Ledger: {report['ledger']['path']}")
+    print(f"Exists: {report['ledger']['exists']}")
+    print(f"Records: {report['record_count']}")
+    print(f"Groups: {report['group_count']}")
+    print()
+    print(f"Review: {report['review_class'].upper()}")
+    print(f"Reason: {report['review_reason']}")
+    print()
+
+    if report["groups"]:
+        print("Top proposal groups:")
+        for group in report["groups"][:10]:
+            repeat = "repeat" if group["is_repeat"] else "single"
+            cats = ", ".join(group["category_counts"].keys()) or "unknown"
+            print(f"  - {group['proposal_id']} [{repeat}] count={group['count']} cats={cats}")
+            if group.get("latest_summary"):
+                print(f"    latest: {group['latest_summary']}")
+            print(f"    first: {group.get('first_seen')}")
+            print(f"    last:  {group.get('last_seen')}")
+    else:
+        print("No proposal records found.")
+
+    if report["parse_errors"]:
+        print()
+        print("Parse warnings:")
+        for err in report["parse_errors"][:10]:
+            print(f"  - line {err['line']}: {err['error']}")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Read-only review and dedupe for LilHouse agent proposal ledger.")
+    ap.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    ap.add_argument("--state-dir", default=os.environ.get("LILHOUSE_STATE_DIR", "/var/lib/lilhouse"))
+    ap.add_argument("--proposals-file", default=os.environ.get("LILHOUSE_PROPOSALS_FILE"))
+    ap.add_argument("--limit", type=int, default=500, help="Read only the latest N proposal records. Use 0 for all.")
+    args = ap.parse_args()
+
+    path = args.proposals_file or str(Path(args.state_dir) / "proposals.jsonl")
+    limit = None if args.limit == 0 else args.limit
+
+    records, errors, exists = read_jsonl(path, limit=limit)
+    groups = review(records)
+    klass, reason = review_class(groups)
+
+    report = {
+        "schema": SCHEMA,
+        "ts": now_iso(),
+        "mode": "read_only_agent_proposal_review",
+        "writes_files": False,
+        "executes_router_changes": False,
+        "agent_may_execute_changes": False,
+        "ledger": {
+            "path": path,
+            "exists": exists,
+            "limit": limit,
+        },
+        "record_count": len(records),
+        "group_count": len(groups),
+        "repeat_group_count": len([g for g in groups if g["is_repeat"]]),
+        "review_class": klass,
+        "review_reason": reason,
+        "groups": groups,
+        "parse_errors": errors,
+    }
+
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print_human(report)
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

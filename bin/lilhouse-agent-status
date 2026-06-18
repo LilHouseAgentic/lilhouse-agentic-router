@@ -182,8 +182,9 @@ def build_report(args):
         "summary": summary,
         "safe_next_commands": [
             "lilhouse-agent-readiness --check",
-        "lilhouse-router-doctor --json",
-        "lilhouse-agent-propose --json",
+            "lilhouse-router-doctor --json",
+            "lilhouse-agent-propose --json",
+            "lilhouse-agent-proposal-review --json",
             "sudo lilhouse-storage-maintenance --dry-run",
             "sudo lilhouse-storage-summary --dry-run",
             "sudo lilhouse-storage-query --path <term> --show --lines 40",
