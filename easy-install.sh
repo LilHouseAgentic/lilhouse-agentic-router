@@ -438,27 +438,42 @@ lan = answers.get("lan")
 
 print()
 print("======================================")
-print(" LilHouse install complete")
+print(" LilHouse install summary")
 print("======================================")
 print()
 display_mode = "full-install" if mode == "vm-live" else "dry-run" if mode == "vm" else mode
-print(f"Mode: {display_mode}")
-print(f"WAN:  {wan}")
-print(f"LAN:  {lan}")
-print(f"LAN gateway: {answers.get('lan_ip', '192.168.2.1')}")
-print(f"LAN subnet:  {answers.get('lan_net', '192.168.2.0/24')}")
-print(f"DHCP range:  {answers.get('dhcp_start', '192.168.2.100')}-{answers.get('dhcp_end', '192.168.2.200')}")
-print(f"DNS:         {answers.get('lan_ip', '192.168.2.1')}")
+
+print("Status:")
+if display_mode == "full-install":
+    print("  Router install completed.")
+else:
+    print("  Dry-run completed. No live router changes were applied.")
 print()
-print("Features:")
-print(f"  CAKE/SQM:        {'yes' if features.get('cake') else 'no'}")
-print(f"  CAKE profile:    {features.get('cake_profile', 'conservative')}")
-print(f"  CAKE rates:      {features.get('cake_down', '100mbit')} down / {features.get('cake_up', '20mbit')} up")
-print(f"  Core agent:      {'yes' if features.get('ai_agent') else 'no'}")
-print(f"  Mobile alerts:   {'yes' if features.get('mobile_alerts') else 'no'}")
+
+print("Network:")
+print(f"  WAN/upstream: {wan}")
+print(f"  LAN/client:   {lan}")
 print()
+
+print("Client network:")
+print(f"  Gateway:      {answers.get('lan_ip', '192.168.2.1')}")
+print(f"  DNS:          {answers.get('lan_ip', '192.168.2.1')}")
+print(f"  Subnet:       {answers.get('lan_net', '192.168.2.0/24')}")
+print(f"  DHCP range:   {answers.get('dhcp_start', '192.168.2.100')}-{answers.get('dhcp_end', '192.168.2.200')}")
+print()
+
+print("Services:")
+print("  DNS/DHCP:     Pi-hole + Unbound")
+print("  Firewall:     nftables NAT")
+print(f"  CAKE/SQM:     {'yes' if features.get('cake') else 'no'}")
+print(f"  CAKE profile: {features.get('cake_profile', 'conservative')}")
+print(f"  CAKE rates:   {features.get('cake_down', '100mbit')} down / {features.get('cake_up', '20mbit')} up")
+print(f"  Core agent:   {'yes' if features.get('ai_agent') else 'no'}")
+print(f"  Alerts:       {'yes' if features.get('mobile_alerts') else 'no'}")
+print()
+
+deployment_items = []
 if summary:
-    print("Deployment:")
     for label, key in [
         ("appliance prep", "appliance_prep_ok"),
         ("DNS active", "appliance_dns_active"),
@@ -469,7 +484,13 @@ if summary:
         ("safe to leave live", "safe_to_leave_live_state"),
     ]:
         if key in summary:
-            print(f"  {'✓' if summary.get(key) else '✗'} {label}")
+            deployment_items.append((label, bool(summary.get(key))))
+
+if deployment_items:
+    print("Deployment:")
+    for label, passed in deployment_items:
+        print(f"  {'✓' if passed else '✗'} {label}")
+    print()
 PY_CLEAN_RESULT
 
   if [ "${MODE:-}" = "vm-live" ]; then
@@ -522,12 +543,24 @@ PY_CLEAN_RESULT
     done
 
     echo
-    echo "Next step: plug a device into the LAN side."
-    echo "It should receive an address in $LAN_NET with gateway/DNS $LAN_IP."
+    echo "======================================"
+    echo " What to do next"
+    echo "======================================"
     echo
-    echo "Later, check router health with: sudo lilhouse-router-status"
-    echo "Check LilHouse storage usage with: sudo lilhouse-storage-status"
-    echo "To change CAKE speeds later: sudo lilhouse-cake-set --down 250 --up 35"
+    echo "1. Plug a device into the LAN/client side: $LAN"
+    echo "2. The device should receive:"
+    echo "     IP:      $DHCP_START-$DHCP_END"
+    echo "     Gateway: $LAN_IP"
+    echo "     DNS:     $LAN_IP"
+    echo "3. Check client readiness:"
+    echo "     sudo lilhouse-client-readiness"
+    echo
+    echo "Useful commands:"
+    echo "  sudo lilhouse-router-status"
+    echo "  sudo lilhouse-client-readiness"
+    echo "  sudo lilhouse-storage-status"
+    echo "  lilhouse-agent-status"
+    echo "  sudo lilhouse-cake-set --down 250 --up 35"
   fi
 
   echo
@@ -645,6 +678,14 @@ if [ "$MODE" = "wizard" ]; then
   echo "======================================"
   echo
   echo "Fresh Debian + two wired NICs = smart home router."
+  echo
+  echo "This installer will configure this machine as a LilHouse router."
+  echo
+  echo "Basic layout:"
+  echo "  WAN = internet/upstream side"
+  echo "  LAN = client/device side"
+  echo
+  echo "If you are unsure, accept the detected defaults and review the install plan before continuing."
   echo
 
   detect_interfaces
@@ -782,18 +823,31 @@ fi
   MOBILE_ALERTS="$(ask_yes_no "Configure mobile push alerts now? You can choose no and set them up after install." "${MOBILE_ALERTS:-no}")"
 
   echo
-  echo "Install summary:"
   if [ "$MODE" = "vm-live" ]; then DISPLAY_MODE="full-install"; else DISPLAY_MODE="dry-run"; fi
-  echo "  mode=$DISPLAY_MODE"
-  echo "  wan=$WAN"
-  echo "  lan=$LAN"
-  echo "  lan_gateway=$LAN_IP"
-  echo "  lan_subnet=$LAN_NET"
-  echo "  dhcp_range=$DHCP_START-$DHCP_END"
-  echo "  dns=Pi-hole + Unbound"
-  echo "  firewall=nftables NAT"
-  echo "  sqm=CAKE ($CAKE_PROFILE, $CAKE_DOWN down / $CAKE_UP up)"
-  echo "  work_dir=$WORK_DIR"
+  echo "======================================"
+  echo " LilHouse install plan"
+  echo "======================================"
+  echo
+  echo "Mode:"
+  echo "  $DISPLAY_MODE"
+  echo
+  echo "Network:"
+  echo "  WAN/upstream: $WAN"
+  echo "  LAN/client:   $LAN"
+  echo
+  echo "Client network:"
+  echo "  Gateway/DNS:  $LAN_IP"
+  echo "  Subnet:       $LAN_NET"
+  echo "  DHCP range:   $DHCP_START-$DHCP_END"
+  echo
+  echo "Services:"
+  echo "  DNS/DHCP:     Pi-hole + Unbound"
+  echo "  Firewall:     nftables NAT"
+  echo "  SQM/QoS:      CAKE ($CAKE_PROFILE, $CAKE_DOWN down / $CAKE_UP up)"
+  echo "  Core agent:   read-only status/readiness tools"
+  echo
+  echo "Reports/logs:"
+  echo "  Work dir:     $WORK_DIR"
   echo
 
   if [ "$MODE" = "vm-live" ]; then
@@ -887,25 +941,45 @@ run_logged() {
   fi
 }
 
-echo
-echo "======================================"
-echo " LilHouse Agentic Router Installer"
-echo "======================================"
-echo
-if [ "$MODE" = "vm-live" ]; then DISPLAY_MODE="full-install"; else DISPLAY_MODE="dry-run"; fi
-echo "Mode:       $DISPLAY_MODE"
-echo "WAN:        $WAN"
-echo "LAN:        $LAN"
-echo "Gateway:    $LAN_IP"
-echo "Subnet:     $LAN_NET"
-echo "DHCP:       $DHCP_START-$DHCP_END"
-echo "CAKE:       $CAKE_PROFILE ($CAKE_DOWN down / $CAKE_UP up)"
-echo "Work dir:   $WORK_DIR"
-echo "Logs:       $LOG_DIR"
-echo
+print_run_header() {
+  echo
+  echo "======================================"
+  if [ "$MODE" = "vm-live" ]; then
+    echo " LilHouse is installing"
+    DISPLAY_MODE="full-install"
+  else
+    echo " LilHouse dry-run preview"
+    DISPLAY_MODE="dry-run"
+  fi
+  echo "======================================"
+  echo
+  echo "Mode:"
+  echo "  $DISPLAY_MODE"
+  echo
+  echo "Network:"
+  echo "  WAN/upstream: $WAN"
+  echo "  LAN/client:   $LAN"
+  echo
+  echo "Client network:"
+  echo "  Gateway/DNS:  $LAN_IP"
+  echo "  Subnet:       $LAN_NET"
+  echo "  DHCP range:   $DHCP_START-$DHCP_END"
+  echo
+  echo "Services:"
+  echo "  DNS/DHCP:     Pi-hole + Unbound"
+  echo "  Firewall:     nftables NAT"
+  echo "  SQM/QoS:      CAKE ($CAKE_PROFILE, $CAKE_DOWN down / $CAKE_UP up)"
+  echo
+  echo "Reports/logs:"
+  echo "  Work dir:     $WORK_DIR"
+  echo "  Logs:         $LOG_DIR"
+  echo
+}
+
+print_run_header
 
 if [ "$MODE" = "vm" ]; then
-  echo "Running dry-run simulation..."
+  echo "Running dry-run checks..."
   run_logged "Building VM readiness bundle" "$LOG_DIR/01-vm-readiness-bundle.log" \
     "$BUNDLE" \
     --work-dir "$WORK_DIR/vm-readiness-bundle" \
@@ -919,9 +993,9 @@ if [ "$MODE" = "vm" ]; then
   exit 0
 fi
 
-echo "Installing..."
+echo "Running full install..."
 # Audit safety marker: WARNING: --vm-live installs/activates into / on this disposable VM.
-echo "Detailed logs are saved if anything fails. Final checks will show whether the install was successful."
+echo "Detailed logs are saved in: $LOG_DIR"
 echo
 
 echo "Resetting VM-live work reports..."
