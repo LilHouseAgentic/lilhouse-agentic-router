@@ -21,4 +21,5 @@ v6-diagnostics/
 .vscode/
 .idea/
 import-review/
-\n__pycache__/\n
+
+__pycache__/
