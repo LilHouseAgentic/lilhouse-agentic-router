@@ -194,15 +194,19 @@ Default security posture:
 
 Agent-related tools are currently read-only status/readiness helpers. They do not autonomously change router settings.
 
-## Intellectual property
+## Intellectual property and commercial use
 
-The software code in this repository is released under the MIT License. See [LICENSE](LICENSE).
+LilHouse Agentic Router is source-available for personal, educational, evaluation, research, and non-commercial home-lab use.
+
+Commercial use requires prior written permission from the project owner. This includes selling the software, selling modified versions, bundling it with paid hardware or services, offering managed/hosted/consulting services based on it, or rebranding it commercially.
+
+See [LICENSE](LICENSE) for the full license terms.
+
+Previous public releases up to and including `v0.5.6-alpha-ip-rights-notice` were published under the MIT License. Those older releases remain governed by the license terms that applied to them at the time of release.
 
 Copyright notices and attribution are documented in [NOTICE](NOTICE).
 
-The MIT License grants rights to use, copy, modify, distribute, and sell copies of
-the software, subject to the license terms. It does not grant ownership of the
-LilHouse project name, branding, logos, or marks.
+Commercial licensing information is documented in [COMMERCIAL-LICENSING.md](COMMERCIAL-LICENSING.md).
 
 Project names and branding are covered separately in [TRADEMARKS.md](TRADEMARKS.md).
 
