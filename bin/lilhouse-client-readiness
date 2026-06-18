@@ -214,7 +214,7 @@ PY
   if [ "${lease_count:-0}" -gt 0 ]; then
     ok "LAN DHCP lease(s) seen: $lease_count"
   else
-    warn "No LAN DHCP leases seen yet"
+    info "No LAN DHCP leases seen yet"
   fi
 else
   warn "DHCP lease file not found: $LEASE_FILE"
