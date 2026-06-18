@@ -14,6 +14,7 @@ echo "== install into fake root =="
 
 echo
 echo "== verify installed files =="
+bash -n "$REPO_DIR/bin/lilhouse-client-readiness"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-event"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-action"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-current-state"
