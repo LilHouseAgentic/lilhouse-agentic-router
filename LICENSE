@@ -1,21 +1,29 @@
-MIT License
+LilHouse Source Available License v1.0
 
-Copyright (c) 2026 LilHouse Agentic Router contributors
+Copyright (c) 2026 LilHouse Agentic Router contributors.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This license applies to LilHouse Agentic Router version v0.5.7 and later, unless a different license is explicitly stated.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Previous public releases up to and including v0.5.6-alpha-ip-rights-notice were published under the MIT License. Those older releases remain governed by the license terms that applied to them at the time of release.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Permission is granted to view, copy, run, modify, and share this software for personal, educational, evaluation, research, and non-commercial home-lab use.
+
+Commercial use is not permitted without prior written permission from the project owner.
+
+Commercial use includes, but is not limited to:
+
+- selling the software
+- selling modified versions of the software
+- selling router appliances, images, devices, or services that include the software
+- offering hosted, managed, SaaS, support, deployment, installation, or consulting services based on the software
+- bundling the software with paid products or services
+- using the software internally or externally to support a commercial product, commercial service, or revenue-generating operation
+- rebranding, white-labelling, or presenting the software as part of a commercial offering
+
+Forks and modified versions must keep this license, copyright notices, and attribution notices intact.
+
+This license does not grant permission to use the LilHouse name, LilHouse Agentic name, LilHouse Agentic Router name, logos, branding, or marks in a way that suggests endorsement, sponsorship, official status, or ownership.
+
+Commercial licenses may be granted separately by the project owner.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, SECURITY, RELIABILITY, OR NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHORS, COPYRIGHT HOLDERS, OR PROJECT OWNER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

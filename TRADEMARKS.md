@@ -1,9 +1,8 @@
 # Trade mark and brand notice
 
-The LilHouse Agentic Router software is released under the MIT License.
+LilHouse Agentic Router is source-available under the LilHouse Source Available License v1.0.
 
-The MIT License applies to the software code. It does not grant rights to use the
-project's names, branding, logos, or marks as your own brand.
+The software license does not grant rights to use the project's names, branding, logos, or marks as your own brand.
 
 Project identifiers include:
 
@@ -28,6 +27,7 @@ Examples of restricted uses:
 - publishing a modified fork as "the official LilHouse Agentic Router"
 - using LilHouse branding to imply endorsement
 - registering confusingly similar names for router software or services
+- using LilHouse branding in a commercial product or service without permission
 
 This notice covers unregistered brand and trade mark rights. It does not claim
 that every listed name is registered in every jurisdiction.
