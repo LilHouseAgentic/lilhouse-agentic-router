@@ -59,7 +59,10 @@ BUILTIN_POLICY = {
     },
     "command_tiers": {
         "observe_read_only": ["lilhouse-storage-maintenance --dry-run"],
-        "additive_write_requires_yes": ["lilhouse-storage-summary --write-summary --yes"],
+        "additive_write_requires_yes": [
+            "lilhouse-storage-summary --write-summary --yes",
+            "lilhouse-agent-propose --write-proposal --yes",
+        ],
         "guarded_execute_requires_operator": ["lilhouse-storage-archive --execute --yes"],
         "forbidden_for_agents": ["delete arbitrary files", "truncate active ledgers"],
     },
