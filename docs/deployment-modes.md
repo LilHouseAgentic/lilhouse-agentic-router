@@ -1,31 +1,33 @@
-# Deployment Modes
+# LilHouse deployment modes
 
-LilHouse Agentic Router has two major deployment modes.
+LilHouse has two install modes.
 
-## Observe-only mode
+## Observe-only
 
-Observe-only mode is the safe default.
+Observe-only installs LilHouse tools, status commands, storage tools, and agent-readable diagnostics without turning the host into a router.
 
-It installs monitoring, status, and worker tools without changing router behaviour.
+```bash
+sudo ./install.sh --mode observe-only
+```
 
-It may collect state, write JSON reports, write ledgers, run read-only workers, print summaries, and run safe systemd timers.
+## Router-deploy
 
-It must not change interfaces, firewall rules, DNS services, NAT, DHCP, CAKE/SQM, packages, or reboot the system.
+Router-deploy turns a fresh Debian host into a LilHouse router.
 
-Current installer behaviour is observe-only.
+```bash
+sudo ./install.sh --mode router-deploy --wan eth0 --lan eth1 --yes
+```
 
-## Router-deploy mode
+Router-deploy configures LAN addressing, IPv4 forwarding, nftables firewall/NAT, Pi-hole DHCP/DNS, Unbound, CAKE/SQM, and LilHouse timers.
 
-Router-deploy mode is planned.
+Use explicit interfaces. WAN is the upstream/internet side. LAN is the client side.
 
-It will turn a fresh Debian Raspberry Pi into a working LilHouse router.
+## Router-deploy dry-run
 
-It may configure WAN, LAN, static LAN IP, DHCP, Pi-hole, Unbound, forwarding, firewall/NAT, CAKE/SQM, systemd services, and worker timers.
+Dry-run generates a preview and does not install router services.
 
-Router-deploy mode must ask for WAN/LAN interfaces, show a plan before applying, back up changed files, avoid overwriting unknown setups, and support dry-run testing where practical.
+```bash
+./install.sh --mode router-deploy --wizard --dry-run --wan eth0 --lan eth1
+```
 
-Target command: sudo ./install.sh --mode router-deploy --wizard
-
-## Future install flow
-
-Install Debian, clone LilHouse, run the wizard, select WAN/LAN, confirm the generated router plan, plug WAN/LAN in, and configure optional extras later.
+Use dry-run to inspect the chosen interfaces and generated router configuration before running router-deploy.
