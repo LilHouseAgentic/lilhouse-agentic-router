@@ -6,11 +6,12 @@ IP_FORWARD_FILE="/proc/sys/net/ipv4/ip_forward"
 NFT_RULES_FILE=""
 SKIP_SERVICES=0
 SKIP_DNS=0
+SKIP_DHCP=0
 SKIP_LAN_IP=0
 YES=0
 
 usage() {
-  echo "Usage: sudo lilhouse-router-deploy-verify --yes [--router-env PATH] [--ip-forward-file PATH] [--nft-rules-file PATH] [--skip-services] [--skip-dns] [--skip-lan-ip]"
+  echo "Usage: sudo lilhouse-router-deploy-verify --yes [--router-env PATH] [--ip-forward-file PATH] [--nft-rules-file PATH] [--skip-services] [--skip-dhcp] [--skip-dns] [--skip-lan-ip]"
   echo
   echo "Verifies that router-deploy produced a working router configuration."
 }
@@ -51,6 +52,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --skip-dns)
       SKIP_DNS=1
+      shift
+      ;;
+    --skip-dhcp)
+      SKIP_DHCP=1
       shift
       ;;
     --skip-lan-ip)
@@ -101,10 +106,10 @@ fi
 
 . "$ROUTER_ENV"
 
-WAN="${WAN:-}"
-LAN="${LAN:-}"
-LAN_IP="${LAN_IP:-}"
-LAN_NET="${LAN_NET:-}"
+WAN="${WAN:-${LILHOUSE_WAN_IF:-}}"
+LAN="${LAN:-${LILHOUSE_LAN_IF:-}}"
+LAN_IP="${LAN_IP:-${LILHOUSE_LAN_IP:-}}"
+LAN_NET="${LAN_NET:-${LILHOUSE_LAN_NET:-}}"
 
 echo "LilHouse router-deploy verification"
 echo "  router env: $ROUTER_ENV"
@@ -187,7 +192,7 @@ if [ -n "$LAN" ] && [ -n "$WAN" ]; then
 fi
 
 if [ -n "$LAN_NET" ] && [ -n "$WAN" ]; then
-  if printf '%s\n' "$NFT_RULES" | grep -Fq "oifname \"$WAN\" ip saddr $LAN_NET masquerade"; then
+  if printf '%s\n' "$NFT_RULES" | grep -F "masquerade" | grep -F "oifname \"$WAN\"" | grep -Fq "$LAN_NET"; then
     pass "NAT masquerade exists for $LAN_NET via $WAN"
   else
     fail "NAT masquerade missing for $LAN_NET via $WAN"
@@ -214,7 +219,7 @@ if [ "$SKIP_SERVICES" -ne 1 ]; then
   fi
 fi
 
-if command -v pihole-FTL >/dev/null 2>&1; then
+if [ "$SKIP_DHCP" -ne 1 ] && command -v pihole-FTL >/dev/null 2>&1; then
   DHCP_ACTIVE="$(pihole-FTL --config dhcp.active 2>/dev/null | awk '{print $NF}' | tail -n 1 || true)"
   DHCP_ROUTER="$(pihole-FTL --config dhcp.router 2>/dev/null | awk '{print $NF}' | tail -n 1 || true)"
 

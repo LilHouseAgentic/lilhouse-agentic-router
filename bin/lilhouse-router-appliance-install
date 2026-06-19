@@ -235,10 +235,10 @@ DNSMASQEOF
   # Pi-hole v6/FTL preferred config path. If these fail, the installer must fail.
   pihole-FTL --config dns.upstreams '[ "127.0.0.1#5335" ]'
   pihole-FTL --config webserver.port "${LAN_IP}:80o,${LAN_IP}:443os"
-  # Pi-hole v6 DHCP must be populated before enabling dhcp.active.
-  # Enabling dhcp.active first fails on fresh/random installs because start/end/router are empty.
-  pihole-FTL --config dhcp.start "$DHCP_START"
+  # Pi-hole v6 DHCP: disable DHCP while changing ranges so old/new subnet values cannot form an invalid intermediate range.
+  pihole-FTL --config dhcp.active false || true
   pihole-FTL --config dhcp.end "$DHCP_END"
+  pihole-FTL --config dhcp.start "$DHCP_START"
   pihole-FTL --config dhcp.router "$LAN_IP"
   pihole-FTL --config dhcp.leaseTime "24h"
   pihole-FTL --config dhcp.active true
