@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+import argparse
+import ipaddress
+import os
+import subprocess
+
+CANDIDATES = [
+    "192.168.2.1/24",
+    "192.168.50.1/24",
+    "192.168.88.1/24",
+    "192.168.100.1/24",
+    "192.168.10.1/24",
+    "192.168.20.1/24",
+]
+
+def detect_wan_cidr(wan):
+    forced = os.environ.get("LILHOUSE_TEST_WAN_IPV4_CIDR", "").strip()
+    if forced:
+        return forced
+    try:
+        proc = subprocess.run(["ip", "-4", "-o", "addr", "show", "dev", wan, "scope", "global"], text=True, capture_output=True, check=False)
+    except Exception:
+        return ""
+    for line in proc.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 4:
+            return parts[3]
+    return ""
+
+def pick_lan_cidr(wan_cidr):
+    try:
+        wan_net = ipaddress.ip_interface(wan_cidr).network if wan_cidr else None
+    except ValueError:
+        wan_net = None
+    for candidate in CANDIDATES:
+        cand_net = ipaddress.ip_interface(candidate).network
+        if wan_net is None or not wan_net.overlaps(cand_net):
+            return candidate
+    return "192.168.50.1/24"
+
+def main():
+    ap = argparse.ArgumentParser(description="Pick a non-overlapping LilHouse LAN gateway CIDR.")
+    ap.add_argument("--wan", required=True)
+    args = ap.parse_args()
+    print(pick_lan_cidr(detect_wan_cidr(args.wan)))
+
+if __name__ == "__main__":
+    main()
