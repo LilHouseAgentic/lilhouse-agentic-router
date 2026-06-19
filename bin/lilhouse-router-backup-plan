@@ -32,7 +32,7 @@ cat <<'JSON'
   "schema": "lilhouse.router_backup_plan.v1",
   "mode": "plan-only",
   "apply": false,
-  "description": "Files and directories that future router-deploy apply mode must back up before writing anything.",
+  "description": "Files and directories that router-deploy apply backs up before writing anything.",
   "safety": {
     "live_changes": false,
     "copies_files": false,

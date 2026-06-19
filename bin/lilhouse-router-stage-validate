@@ -29,7 +29,7 @@ CONTENT_CHECKS = {
     ],
     "ROLLBACK-NOTES.txt": [
         "LilHouse router deploy rollback preview",
-        "Do not enable apply mode",
+        "Run router-deploy apply only when this host is ready to become the router.",
     ],
     "VALIDATION-CHECKLIST.txt": [
         "LilHouse router deploy validation checklist",
@@ -63,7 +63,7 @@ def read_text(path: Path) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Validate a staged LilHouse router root before future apply mode."
+        description="Validate a staged LilHouse router root before router-deploy apply."
     )
     parser.add_argument("stage_root", help="Staged target root created by lilhouse-router-stage-preview.")
     args = parser.parse_args()

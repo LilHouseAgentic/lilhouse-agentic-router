@@ -225,16 +225,16 @@ grep -q "ROLLBACK-NOTES.txt" "$WIZARD_OUT/preview/MANIFEST.txt"
 grep -q "VALIDATION-CHECKLIST.txt" "$WIZARD_OUT/preview/MANIFEST.txt"
 
 grep -q "LilHouse router deploy rollback preview" "$WIZARD_OUT/preview/ROLLBACK-NOTES.txt"
-grep -q "Future apply mode must back up" "$WIZARD_OUT/preview/ROLLBACK-NOTES.txt"
+grep -q "Router-deploy apply backs up" "$WIZARD_OUT/preview/ROLLBACK-NOTES.txt"
 grep -q "/etc/nftables.conf" "$WIZARD_OUT/preview/ROLLBACK-NOTES.txt"
-grep -q "Do not enable apply mode" "$WIZARD_OUT/preview/ROLLBACK-NOTES.txt"
+grep -q "Run router-deploy apply only when this host is ready to become the router." "$WIZARD_OUT/preview/ROLLBACK-NOTES.txt"
 
 grep -q "LilHouse router deploy validation checklist" "$WIZARD_OUT/preview/VALIDATION-CHECKLIST.txt"
 grep -q "WAN interface exists: eth0" "$WIZARD_OUT/preview/VALIDATION-CHECKLIST.txt"
 grep -q "LAN interface exists: eth1" "$WIZARD_OUT/preview/VALIDATION-CHECKLIST.txt"
 grep -q "nftables preview can be checked without applying" "$WIZARD_OUT/preview/VALIDATION-CHECKLIST.txt"
 grep -q "current SSH/admin session is protected from lockout" "$WIZARD_OUT/preview/VALIDATION-CHECKLIST.txt"
-grep -q "Apply mode must validate, back up, stage, test, and only then activate" "$WIZARD_OUT/preview/VALIDATION-CHECKLIST.txt"
+grep -q "Dry-run generates preview files. Router-deploy apply validates explicit interfaces and installs the router configuration." "$WIZARD_OUT/preview/VALIDATION-CHECKLIST.txt"
 
 grep -q "lan_static_address" "$WIZARD_OUT/router-plan-summary.txt"
 grep -q "forwarding" "$WIZARD_OUT/router-plan-summary.txt"
@@ -2130,5 +2130,13 @@ grep -q "requires explicit --wan and --lan" "$TMP_STATE/router-deploy-no-ifaces.
 test -f "$TMP_STATE/router-deploy-args-dry-run/preview/etc/nftables.conf"
 grep -q 'oifname "eth0" ip saddr' "$TMP_STATE/router-deploy-args-dry-run/preview/etc/nftables.conf"
 grep -q 'iifname "eth1" oifname "eth0" accept' "$TMP_STATE/router-deploy-args-dry-run/preview/etc/nftables.conf"
+
+
+echo
+echo "== stale router-deploy wording blockers =="
+if grep -RniE "Router-deploy mode is planned|Future apply mode|future router-deploy apply|Before any future apply mode|Full final deploy chain is handled|Do not enable apply mode|not implemented yet" install.sh README.md docs bin config; then
+  echo "ERROR: stale router-deploy wording found"
+  exit 1
+fi
 
 echo "Smoke test passed."

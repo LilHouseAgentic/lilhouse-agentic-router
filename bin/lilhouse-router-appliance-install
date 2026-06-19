@@ -493,7 +493,7 @@ main() {
     exit 0
   fi
 
-  echo "Full final deploy chain is handled by easy-install/live orchestrator for now."
+  echo "Router-deploy appliance install complete. Run lilhouse-router-status and lilhouse-client-readiness to verify router and client path."
 }
 
 main "$@"

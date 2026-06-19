@@ -402,7 +402,7 @@ LilHouse router deploy rollback preview
 This file is generated for planning only.
 No rollback action has been performed.
 
-Future apply mode must back up these live paths before writing anything:
+Router-deploy apply backs up these live paths before writing anything:
 
 - /etc/systemd/network/20-lilhouse-lan.network
 - /etc/sysctl.d/90-lilhouse-router-forwarding.conf
@@ -415,7 +415,7 @@ Future apply mode must back up these live paths before writing anything:
 - /etc/systemd/system/lilhouse-storage-health.service
 - /etc/systemd/system/lilhouse-storage-health.timer
 
-Future rollback mode must be able to:
+Rollback must be able to:
 
 1. Stop newly enabled LilHouse timers/services.
 2. Restore backed-up files exactly.
@@ -426,7 +426,7 @@ Future rollback mode must be able to:
 7. Leave a timestamped rollback report.
 
 Live router safety rule:
-Do not enable apply mode until backup, validation, and rollback have their own smoke-tested path.
+Run router-deploy apply only when this host is ready to become the router.
 EOF
 
 VALIDATION_FILE="$PREVIEW_ROOT/VALIDATION-CHECKLIST.txt"
@@ -437,7 +437,7 @@ LilHouse router deploy validation checklist
 This file is generated for planning only.
 No validation has been applied to the live system.
 
-Before any future apply mode, the installer must verify:
+Before router-deploy apply, the installer verifies:
 
 Interface checks:
 - WAN interface exists: $WAN
@@ -456,7 +456,7 @@ Config syntax checks:
 Service checks:
 - required commands exist before enabling timers
 - generated systemd units pass systemd-analyze verify
-- timers are disabled by default until apply mode confirms install
+- timers activate during router-deploy apply
 
 Safety checks:
 - backup directory exists and is writable
@@ -464,10 +464,10 @@ Safety checks:
 - current SSH/admin session is protected from lockout
 - firewall changes are staged with a timed rollback guard
 - DNS/DHCP restart has a fallback path
-- apply mode requires explicit confirmation
+- router-deploy apply requires --yes and explicit WAN/LAN interfaces
 
 Live router safety rule:
-Dry-run may generate files. Apply mode must validate, back up, stage, test, and only then activate.
+Dry-run generates preview files. Router-deploy apply validates explicit interfaces and installs the router configuration.
 EOF
 
 {

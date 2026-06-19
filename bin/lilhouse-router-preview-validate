@@ -47,10 +47,10 @@ need_grep "ROLLBACK-NOTES.txt" "MANIFEST.txt"
 need_grep "VALIDATION-CHECKLIST.txt" "MANIFEST.txt"
 
 need_grep "LilHouse router deploy rollback preview" "ROLLBACK-NOTES.txt"
-need_grep "Do not enable apply mode" "ROLLBACK-NOTES.txt"
+need_grep "Run router-deploy apply only when this host is ready to become the router." "ROLLBACK-NOTES.txt"
 
 need_grep "LilHouse router deploy validation checklist" "VALIDATION-CHECKLIST.txt"
-need_grep "Apply mode must validate, back up, stage, test, and only then activate" "VALIDATION-CHECKLIST.txt"
+need_grep "Dry-run generates preview files. Router-deploy apply validates explicit interfaces and installs the router configuration." "VALIDATION-CHECKLIST.txt"
 
 need_grep "\\[Match\\]" "etc/systemd/network/20-lilhouse-lan.network"
 need_grep "\\[Network\\]" "etc/systemd/network/20-lilhouse-lan.network"

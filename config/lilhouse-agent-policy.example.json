@@ -2,7 +2,7 @@
   "schema": "lilhouse.agent_policy.v1",
   "version": "0.5.0-alpha",
   "default_mode": "read_only_observe",
-  "purpose": "Define the safety contract future LilHouse agents must follow.",
+  "purpose": "Define the operating contract LilHouse agents must follow.",
   "principles": [
     "Observe before proposing.",
     "Read state, summaries, indexes, and raw evidence before deciding.",
