@@ -9,9 +9,82 @@ MODE="observe-only"
 WIZARD=0
 DRY_RUN=0
 ROUTER_WIZARD_OUT_DIR=""
+ROUTER_WAN=""
+ROUTER_LAN=""
+ROUTER_LAN_CIDR="192.168.2.1/24"
+ROUTER_DHCP_START=""
+ROUTER_DHCP_END=""
+ROUTER_CAKE_DOWN=""
+ROUTER_CAKE_UP=""
+ROUTER_PREPARE_ONLY=0
+YES=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --wan)
+      ROUTER_WAN="${2:-}"
+      if [ -z "$ROUTER_WAN" ]; then
+        echo "Missing value for --wan"
+        exit 1
+      fi
+      shift 2
+      ;;
+    --lan)
+      ROUTER_LAN="${2:-}"
+      if [ -z "$ROUTER_LAN" ]; then
+        echo "Missing value for --lan"
+        exit 1
+      fi
+      shift 2
+      ;;
+    --lan-cidr)
+      ROUTER_LAN_CIDR="${2:-}"
+      if [ -z "$ROUTER_LAN_CIDR" ]; then
+        echo "Missing value for --lan-cidr"
+        exit 1
+      fi
+      shift 2
+      ;;
+    --dhcp-start)
+      ROUTER_DHCP_START="${2:-}"
+      if [ -z "$ROUTER_DHCP_START" ]; then
+        echo "Missing value for --dhcp-start"
+        exit 1
+      fi
+      shift 2
+      ;;
+    --dhcp-end)
+      ROUTER_DHCP_END="${2:-}"
+      if [ -z "$ROUTER_DHCP_END" ]; then
+        echo "Missing value for --dhcp-end"
+        exit 1
+      fi
+      shift 2
+      ;;
+    --cake-down)
+      ROUTER_CAKE_DOWN="${2:-}"
+      if [ -z "$ROUTER_CAKE_DOWN" ]; then
+        echo "Missing value for --cake-down"
+        exit 1
+      fi
+      shift 2
+      ;;
+    --cake-up)
+      ROUTER_CAKE_UP="${2:-}"
+      if [ -z "$ROUTER_CAKE_UP" ]; then
+        echo "Missing value for --cake-up"
+        exit 1
+      fi
+      shift 2
+      ;;
+    --prepare-only)
+      ROUTER_PREPARE_ONLY=1
+      shift
+      ;;
+    --yes)
+      YES=1
+      shift
+      ;;
     --mode)
       MODE="${2:-}"
       if [ -z "$MODE" ]; then
@@ -57,10 +130,19 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     -h|--help)
-      echo "Usage: sudo ./install.sh [--mode observe-only|router-deploy] [--wizard] [--dry-run] [--destdir PATH] [--no-systemd]"
+      echo "Usage: sudo ./install.sh [--mode observe-only|router-deploy] [--wan IFACE] [--lan IFACE] [--yes] [--wizard] [--dry-run] [--destdir PATH] [--no-systemd]"
       echo
       echo "  --mode MODE      Deployment mode: observe-only or router-deploy."
-      echo "  --wizard         Future router deployment wizard flag."
+      echo "  --wan IFACE      WAN/upstream interface for router-deploy apply."
+      echo "  --lan IFACE      LAN/client interface for router-deploy apply."
+      echo "  --lan-cidr CIDR  LAN gateway CIDR, default 192.168.2.1/24."
+      echo "  --dhcp-start IP  DHCP start for router-deploy apply."
+      echo "  --dhcp-end IP    DHCP end for router-deploy apply."
+      echo "  --cake-down RATE CAKE download rate for appliance installer."
+      echo "  --cake-up RATE   CAKE upload rate for appliance installer."
+      echo "  --prepare-only   Prepare appliance config/services without final deploy chain."
+      echo "  --yes            Required for router-deploy apply."
+      echo "  --wizard         Router deployment wizard flag."
       echo "  --dry-run        Show intent without applying router-deploy changes."
       echo "  --out-dir PATH   Output directory for router-deploy dry-run wizard plans."
       echo "  --destdir PATH   Install into a fake root for testing."
@@ -82,15 +164,18 @@ if [ "$MODE" = "router-deploy" ]; then
     echo "No system changes will be made."
     echo
 
-    if [ -n "${ROUTER_WIZARD_WAN:-}" ] || [ -n "${ROUTER_WIZARD_LAN:-}" ]; then
-      if [ -z "${ROUTER_WIZARD_WAN:-}" ] || [ -z "${ROUTER_WIZARD_LAN:-}" ]; then
-        echo "Both ROUTER_WIZARD_WAN and ROUTER_WIZARD_LAN must be set when using interface overrides."
+    DRY_WAN="${ROUTER_WAN:-${ROUTER_WIZARD_WAN:-}}"
+    DRY_LAN="${ROUTER_LAN:-${ROUTER_WIZARD_LAN:-}}"
+
+    if [ -n "$DRY_WAN" ] || [ -n "$DRY_LAN" ]; then
+      if [ -z "$DRY_WAN" ] || [ -z "$DRY_LAN" ]; then
+        echo "Both --wan and --lan must be set when using interface overrides."
         exit 2
       fi
 
-      echo "Preview interfaces: WAN=$ROUTER_WIZARD_WAN LAN=$ROUTER_WIZARD_LAN"
+      echo "Preview interfaces: WAN=$DRY_WAN LAN=$DRY_LAN"
       echo
-      "$REPO_DIR/bin/lilhouse-router-wizard" --out-dir "$OUT" --wan "$ROUTER_WIZARD_WAN" --lan "$ROUTER_WIZARD_LAN"
+      "$REPO_DIR/bin/lilhouse-router-wizard" --out-dir "$OUT" --wan "$DRY_WAN" --lan "$DRY_LAN"
       exit $?
     fi
 
@@ -132,15 +217,59 @@ if [ "$MODE" = "router-deploy" ]; then
     done
   fi
 
-  echo "Router-deploy apply mode is planned but not implemented yet."
+  if [ "$YES" -ne 1 ]; then
+    echo "ERROR: router-deploy apply requires --yes"
+    echo
+    echo "Try:"
+    echo "  sudo ./install.sh --mode router-deploy --wan eth0 --lan eth1 --yes"
+    exit 2
+  fi
+
+  if [ -z "$ROUTER_WAN" ] || [ -z "$ROUTER_LAN" ]; then
+    echo "ERROR: router-deploy apply requires explicit --wan and --lan"
+    echo
+    echo "Try:"
+    echo "  sudo ./install.sh --mode router-deploy --wan eth0 --lan eth1 --yes"
+    exit 2
+  fi
+
+  if [ -z "$DESTDIR" ] && [ "${EUID:-$(id -u)}" -ne 0 ]; then
+    echo "Please run router-deploy apply as root:"
+    echo "  sudo ./install.sh --mode router-deploy --wan $ROUTER_WAN --lan $ROUTER_LAN --yes"
+    exit 1
+  fi
+
+  echo "Router-deploy apply requested."
   echo
-  echo "This future mode will configure WAN/LAN, forwarding, firewall/NAT, DHCP, Pi-hole, Unbound, CAKE/SQM, and worker timers."
-  echo "For now, use the dry-run wizard:"
+  echo "This will configure this Debian host as a LilHouse router:"
+  echo "  WAN:      $ROUTER_WAN"
+  echo "  LAN:      $ROUTER_LAN"
+  echo "  LAN CIDR: $ROUTER_LAN_CIDR"
   echo
-  echo "  ./install.sh --mode router-deploy --wizard --dry-run"
-  echo
-  echo "No changes made."
-  exit 2
+
+  CMD=("$REPO_DIR/bin/lilhouse-router-appliance-install" --wan "$ROUTER_WAN" --lan "$ROUTER_LAN" --lan-cidr "$ROUTER_LAN_CIDR" --yes)
+
+  if [ -n "$ROUTER_DHCP_START" ]; then
+    CMD+=(--dhcp-start "$ROUTER_DHCP_START")
+  fi
+
+  if [ -n "$ROUTER_DHCP_END" ]; then
+    CMD+=(--dhcp-end "$ROUTER_DHCP_END")
+  fi
+
+  if [ -n "$ROUTER_CAKE_DOWN" ]; then
+    CMD+=(--cake-down "$ROUTER_CAKE_DOWN")
+  fi
+
+  if [ -n "$ROUTER_CAKE_UP" ]; then
+    CMD+=(--cake-up "$ROUTER_CAKE_UP")
+  fi
+
+  if [ "$ROUTER_PREPARE_ONLY" -eq 1 ]; then
+    CMD+=(--prepare-only)
+  fi
+
+  exec "${CMD[@]}"
 fi
 
 if [ "$WIZARD" -eq 1 ]; then

@@ -71,3 +71,19 @@ Auto prefers:
 If the WAN/upstream network already overlaps that subnet, the installer automatically chooses another advertised `192.168.x.0/24` LAN subnet such as `192.168.50.0/24`.
 
 Only `192.168.x.0/24` choices are advertised in the interactive menu. Custom interactive choices must be `192.168.x.1/24` style gateway CIDRs.
+
+## Router-deploy apply mode
+
+On a fresh Debian router host with explicit WAN and LAN interfaces:
+
+```bash
+sudo ./install.sh --mode router-deploy --wan eth0 --lan eth1 --yes
+```
+
+This path delegates to the LilHouse appliance installer and applies the core router services instead of stopping at a dry-run preview.
+
+Use the dry-run wizard first when unsure:
+
+```bash
+./install.sh --mode router-deploy --wizard --dry-run --wan eth0 --lan eth1
+```

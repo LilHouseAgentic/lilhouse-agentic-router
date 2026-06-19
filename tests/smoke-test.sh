@@ -2109,4 +2109,26 @@ validate_192168_24_cidr "192.168.60.1/24"
 ! validate_192168_24_cidr "10.10.10.1/24"
 ! validate_192168_24_cidr "192.168.60.1/25"
 
+
+echo
+echo "== router-deploy apply refusal checks =="
+set +e
+"$REPO_DIR/install.sh" --mode router-deploy --wan eth0 --lan eth1 > "$TMP_STATE/router-deploy-no-yes.out" 2>&1
+RC=$?
+set -e
+test "$RC" -eq 2
+grep -q "requires --yes" "$TMP_STATE/router-deploy-no-yes.out"
+
+set +e
+"$REPO_DIR/install.sh" --mode router-deploy --yes > "$TMP_STATE/router-deploy-no-ifaces.out" 2>&1
+RC=$?
+set -e
+test "$RC" -eq 2
+grep -q "requires explicit --wan and --lan" "$TMP_STATE/router-deploy-no-ifaces.out"
+
+"$REPO_DIR/install.sh" --mode router-deploy --wizard --dry-run --wan eth0 --lan eth1 --out-dir "$TMP_STATE/router-deploy-args-dry-run" >/dev/null
+test -f "$TMP_STATE/router-deploy-args-dry-run/preview/etc/nftables.conf"
+grep -q 'oifname "eth0" ip saddr' "$TMP_STATE/router-deploy-args-dry-run/preview/etc/nftables.conf"
+grep -q 'iifname "eth1" oifname "eth0" accept' "$TMP_STATE/router-deploy-args-dry-run/preview/etc/nftables.conf"
+
 echo "Smoke test passed."

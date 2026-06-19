@@ -258,3 +258,19 @@ scripts/audit-secrets.sh
 ```
 
 Both should pass.
+
+## Router-deploy apply mode
+
+On a fresh Debian router host with explicit WAN and LAN interfaces:
+
+```bash
+sudo ./install.sh --mode router-deploy --wan eth0 --lan eth1 --yes
+```
+
+This delegates to the LilHouse appliance installer and configures LAN addressing, forwarding, nftables NAT, Pi-hole DHCP/DNS, Unbound, CAKE/SQM, and health timers.
+
+Use the dry-run wizard first when unsure:
+
+```bash
+./install.sh --mode router-deploy --wizard --dry-run --wan eth0 --lan eth1
+```
