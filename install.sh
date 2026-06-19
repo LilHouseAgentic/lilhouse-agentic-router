@@ -390,6 +390,7 @@ backup_existing /usr/local/bin/lilhouse-router-plan
 backup_existing /usr/local/bin/lilhouse-router-plan-summary
 backup_existing /usr/local/bin/lilhouse-router-wizard
 backup_existing /usr/local/bin/lilhouse-router-preview-validate
+backup_existing /usr/local/bin/lilhouse-router-deploy-verify
 backup_existing /usr/local/bin/lilhouse-router-auto-lan-cidr
 backup_existing /usr/local/bin/lilhouse-router-backup-plan
 backup_existing /usr/local/bin/lilhouse-router-backup-dry-run
@@ -473,6 +474,7 @@ install -m 0755 "$REPO_DIR/bin/lilhouse-router-plan" "$(root_path /usr/local/bin
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-plan-summary" "$(root_path /usr/local/bin/lilhouse-router-plan-summary)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-wizard" "$(root_path /usr/local/bin/lilhouse-router-wizard)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-preview-validate" "$(root_path /usr/local/bin/lilhouse-router-preview-validate)"
+install -m 0755 "$REPO_DIR/bin/lilhouse-router-deploy-verify" "$(root_path /usr/local/bin/lilhouse-router-deploy-verify)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-auto-lan-cidr" "$(root_path /usr/local/bin/lilhouse-router-auto-lan-cidr)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-backup-plan" "$(root_path /usr/local/bin/lilhouse-router-backup-plan)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-backup-dry-run" "$(root_path /usr/local/bin/lilhouse-router-backup-dry-run)"

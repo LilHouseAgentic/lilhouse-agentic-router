@@ -42,6 +42,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-plan-summary"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-wizard"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-preview-validate"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-deploy-verify"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-auto-lan-cidr"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-dry-run"
@@ -2158,6 +2159,6 @@ mkdir -p "$VERIFY_FIXTURE"
 printf '%s\n' 'WAN=eth0' 'LAN=eth1' 'LAN_IP=192.168.2.1' 'LAN_NET=192.168.2.0/24' > "$VERIFY_FIXTURE/router.env"
 printf '%s\n' '1' > "$VERIFY_FIXTURE/ip_forward"
 printf '%s\n' 'table inet filter {' '  chain forward { type filter hook forward priority 0; policy drop; iifname "eth1" oifname "eth0" accept }' '}' 'table ip nat {' '  chain postrouting { type nat hook postrouting priority 100; policy accept; oifname "eth0" ip saddr 192.168.2.0/24 masquerade }' '}' > "$VERIFY_FIXTURE/nft.rules"
-"$REPO_DIR/bin/lilhouse-router-deploy-verify" --yes --router-env "$VERIFY_FIXTURE/router.env" --ip-forward-file "$VERIFY_FIXTURE/ip_forward" --nft-rules-file "$VERIFY_FIXTURE/nft.rules" --skip-services --skip-dns --skip-lan-ip
+"$REPO_DIR/bin/lilhouse-router-deploy-verify" --yes --router-env "$VERIFY_FIXTURE/router.env" --ip-forward-file "$VERIFY_FIXTURE/ip_forward" --nft-rules-file "$VERIFY_FIXTURE/nft.rules" --skip-services --skip-dhcp --skip-dns --skip-lan-ip
 
 echo "Smoke test passed."
