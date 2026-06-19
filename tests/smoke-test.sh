@@ -42,6 +42,7 @@ test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-plan-summary"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-wizard"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-preview-validate"
+test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-auto-lan-cidr"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-plan"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-dry-run"
 test -x "$TMP_ROOT/usr/local/bin/lilhouse-router-backup-create"
@@ -160,7 +161,7 @@ echo "== run installer router-deploy dry-run wizard =="
 
 WIZARD_OUT="$TMP_STATE/install-router-wizard"
 WIZARD_LOG="$TMP_STATE/install-router-wizard.out"
-ROUTER_WIZARD_WAN=eth0 ROUTER_WIZARD_LAN=eth1 \
+ROUTER_WIZARD_WAN=eth0 ROUTER_WIZARD_LAN=eth1 LILHOUSE_TEST_WAN_IPV4_CIDR="172.28.39.109/20" \
   ./install.sh --mode router-deploy --wizard --dry-run --out-dir "$WIZARD_OUT" >"$WIZARD_LOG"
 
 test -f "$WIZARD_OUT/interface-report.json"
@@ -2138,6 +2139,17 @@ if grep -RniE "Router-deploy mode is planned|Future apply mode|future router-dep
   echo "ERROR: stale router-deploy wording found"
   exit 1
 fi
+
+
+echo
+echo "== install.sh router-deploy auto LAN overlap dry-run =="
+AUTO_OVERLAP_OUT="$TMP_STATE/install-router-auto-overlap"
+rm -rf "$AUTO_OVERLAP_OUT"
+LILHOUSE_TEST_WAN_IPV4_CIDR="192.168.2.250/24" "$REPO_DIR/install.sh" --mode router-deploy --wizard --dry-run --wan eth0 --lan eth1 --out-dir "$AUTO_OVERLAP_OUT"
+grep -q "LAN address: 192.168.50.1/24" "$AUTO_OVERLAP_OUT/preview/MANIFEST.txt"
+grep -q "LAN subnet: 192.168.50.0/24" "$AUTO_OVERLAP_OUT/preview/MANIFEST.txt"
+grep -q "DHCP range: 192.168.50.100 - 192.168.50.200" "$AUTO_OVERLAP_OUT/preview/MANIFEST.txt"
+grep -q "oifname \"eth0\" ip saddr 192.168.50.0/24 masquerade" "$AUTO_OVERLAP_OUT/preview/etc/nftables.conf"
 
 echo
 echo "== router-deploy verification fixture =="

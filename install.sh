@@ -12,6 +12,9 @@ ROUTER_WIZARD_OUT_DIR=""
 ROUTER_WAN=""
 ROUTER_LAN=""
 ROUTER_LAN_CIDR="192.168.2.1/24"
+ROUTER_LAN_CIDR_EXPLICIT=0
+ROUTER_LAN_IP=""
+ROUTER_LAN_NET=""
 ROUTER_DHCP_START=""
 ROUTER_DHCP_END=""
 ROUTER_CAKE_DOWN=""
@@ -39,6 +42,7 @@ while [ "$#" -gt 0 ]; do
       ;;
     --lan-cidr)
       ROUTER_LAN_CIDR="${2:-}"
+      ROUTER_LAN_CIDR_EXPLICIT=1
       if [ -z "$ROUTER_LAN_CIDR" ]; then
         echo "Missing value for --lan-cidr"
         exit 1
@@ -135,7 +139,7 @@ while [ "$#" -gt 0 ]; do
       echo "  --mode MODE      Deployment mode: observe-only or router-deploy."
       echo "  --wan IFACE      WAN/upstream interface for router-deploy apply."
       echo "  --lan IFACE      LAN/client interface for router-deploy apply."
-      echo "  --lan-cidr CIDR  LAN gateway CIDR, default 192.168.2.1/24."
+      echo "  --lan-cidr CIDR  LAN gateway CIDR. Default is auto: 192.168.2.1/24 unless WAN overlaps."
       echo "  --dhcp-start IP  DHCP start for router-deploy apply."
       echo "  --dhcp-end IP    DHCP end for router-deploy apply."
       echo "  --cake-down RATE CAKE download rate for appliance installer."
@@ -175,7 +179,13 @@ if [ "$MODE" = "router-deploy" ]; then
 
       echo "Preview interfaces: WAN=$DRY_WAN LAN=$DRY_LAN"
       echo
-      "$REPO_DIR/bin/lilhouse-router-wizard" --out-dir "$OUT" --wan "$DRY_WAN" --lan "$DRY_LAN"
+      AUTO_LAN_CIDR="$("$REPO_DIR/bin/lilhouse-router-auto-lan-cidr" --wan "$DRY_WAN")"
+      AUTO_LAN_IP="${AUTO_LAN_CIDR%/*}"
+      AUTO_LAN_NET="$(python3 -c 'import ipaddress,sys; print(ipaddress.ip_interface(sys.argv[1]).network)' "$AUTO_LAN_CIDR")"
+      AUTO_PREFIX="$(python3 -c 'import ipaddress,sys; i=ipaddress.ip_interface(sys.argv[1]); print(".".join(str(i.ip).split(".")[:3]))' "$AUTO_LAN_CIDR")"
+      AUTO_DHCP_START="${ROUTER_DHCP_START:-${AUTO_PREFIX}.100}"
+      AUTO_DHCP_END="${ROUTER_DHCP_END:-${AUTO_PREFIX}.200}"
+      "$REPO_DIR/bin/lilhouse-router-wizard" --out-dir "$OUT" --wan "$DRY_WAN" --lan "$DRY_LAN" --lan-ip "$AUTO_LAN_IP" --subnet "$AUTO_LAN_NET" --dhcp-start "$AUTO_DHCP_START" --dhcp-end "$AUTO_DHCP_END"
       exit $?
     fi
 
@@ -238,6 +248,15 @@ if [ "$MODE" = "router-deploy" ]; then
     echo "  sudo ./install.sh --mode router-deploy --wan $ROUTER_WAN --lan $ROUTER_LAN --yes"
     exit 1
   fi
+
+  if [ "$ROUTER_LAN_CIDR_EXPLICIT" -ne 1 ]; then
+    ROUTER_LAN_CIDR="$("$REPO_DIR/bin/lilhouse-router-auto-lan-cidr" --wan "$ROUTER_WAN")"
+  fi
+  ROUTER_LAN_IP="${ROUTER_LAN_CIDR%/*}"
+  ROUTER_LAN_NET="$(python3 -c 'import ipaddress,sys; print(ipaddress.ip_interface(sys.argv[1]).network)' "$ROUTER_LAN_CIDR")"
+  ROUTER_PREFIX="$(python3 -c 'import ipaddress,sys; i=ipaddress.ip_interface(sys.argv[1]); print(".".join(str(i.ip).split(".")[:3]))' "$ROUTER_LAN_CIDR")"
+  ROUTER_DHCP_START="${ROUTER_DHCP_START:-${ROUTER_PREFIX}.100}"
+  ROUTER_DHCP_END="${ROUTER_DHCP_END:-${ROUTER_PREFIX}.200}"
 
   echo "Router-deploy apply requested."
   echo
@@ -371,6 +390,7 @@ backup_existing /usr/local/bin/lilhouse-router-plan
 backup_existing /usr/local/bin/lilhouse-router-plan-summary
 backup_existing /usr/local/bin/lilhouse-router-wizard
 backup_existing /usr/local/bin/lilhouse-router-preview-validate
+backup_existing /usr/local/bin/lilhouse-router-auto-lan-cidr
 backup_existing /usr/local/bin/lilhouse-router-backup-plan
 backup_existing /usr/local/bin/lilhouse-router-backup-dry-run
 backup_existing /usr/local/bin/lilhouse-router-backup-create
@@ -453,6 +473,7 @@ install -m 0755 "$REPO_DIR/bin/lilhouse-router-plan" "$(root_path /usr/local/bin
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-plan-summary" "$(root_path /usr/local/bin/lilhouse-router-plan-summary)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-wizard" "$(root_path /usr/local/bin/lilhouse-router-wizard)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-preview-validate" "$(root_path /usr/local/bin/lilhouse-router-preview-validate)"
+install -m 0755 "$REPO_DIR/bin/lilhouse-router-auto-lan-cidr" "$(root_path /usr/local/bin/lilhouse-router-auto-lan-cidr)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-backup-plan" "$(root_path /usr/local/bin/lilhouse-router-backup-plan)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-backup-dry-run" "$(root_path /usr/local/bin/lilhouse-router-backup-dry-run)"
 install -m 0755 "$REPO_DIR/bin/lilhouse-router-backup-create" "$(root_path /usr/local/bin/lilhouse-router-backup-create)"
