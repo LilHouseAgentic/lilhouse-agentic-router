@@ -493,7 +493,14 @@ main() {
     exit 0
   fi
 
-  echo "Router-deploy appliance install complete. Run lilhouse-router-status and lilhouse-client-readiness to verify router and client path."
+  echo "=== Verifying router-deploy install ==="
+  VERIFY_CMD="/usr/local/bin/lilhouse-router-deploy-verify"
+  if [ ! -x "$VERIFY_CMD" ]; then
+    VERIFY_CMD="$REPO_DIR/bin/lilhouse-router-deploy-verify"
+  fi
+  "$VERIFY_CMD" --yes
+
+  echo "Router-deploy appliance install complete. Router verification passed."
 }
 
 main "$@"

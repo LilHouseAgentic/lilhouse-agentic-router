@@ -1,0 +1,253 @@
+#!/usr/bin/env bash
+set -u
+
+ROUTER_ENV="/etc/lilhouse/router.env"
+IP_FORWARD_FILE="/proc/sys/net/ipv4/ip_forward"
+NFT_RULES_FILE=""
+SKIP_SERVICES=0
+SKIP_DNS=0
+SKIP_LAN_IP=0
+YES=0
+
+usage() {
+  echo "Usage: sudo lilhouse-router-deploy-verify --yes [--router-env PATH] [--ip-forward-file PATH] [--nft-rules-file PATH] [--skip-services] [--skip-dns] [--skip-lan-ip]"
+  echo
+  echo "Verifies that router-deploy produced a working router configuration."
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --yes)
+      YES=1
+      shift
+      ;;
+    --router-env)
+      ROUTER_ENV="${2:-}"
+      if [ -z "$ROUTER_ENV" ]; then
+        echo "ERROR: missing value for --router-env" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
+    --ip-forward-file)
+      IP_FORWARD_FILE="${2:-}"
+      if [ -z "$IP_FORWARD_FILE" ]; then
+        echo "ERROR: missing value for --ip-forward-file" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
+    --nft-rules-file)
+      NFT_RULES_FILE="${2:-}"
+      if [ -z "$NFT_RULES_FILE" ]; then
+        echo "ERROR: missing value for --nft-rules-file" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
+    --skip-services)
+      SKIP_SERVICES=1
+      shift
+      ;;
+    --skip-dns)
+      SKIP_DNS=1
+      shift
+      ;;
+    --skip-lan-ip)
+      SKIP_LAN_IP=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ "$YES" -ne 1 ]; then
+  echo "ERROR: refusing router-deploy verification without --yes" >&2
+  echo "Try: sudo lilhouse-router-deploy-verify --yes" >&2
+  exit 2
+fi
+
+fail_count=0
+
+pass() {
+  echo "PASS: $*"
+}
+
+fail() {
+  echo "FAIL: $*"
+  fail_count=$((fail_count + 1))
+}
+
+need_cmd() {
+  if command -v "$1" >/dev/null 2>&1; then
+    pass "command exists: $1"
+  else
+    fail "missing command: $1"
+  fi
+}
+
+if [ ! -f "$ROUTER_ENV" ]; then
+  echo "FAIL: router env missing: $ROUTER_ENV"
+  exit 1
+fi
+
+. "$ROUTER_ENV"
+
+WAN="${WAN:-}"
+LAN="${LAN:-}"
+LAN_IP="${LAN_IP:-}"
+LAN_NET="${LAN_NET:-}"
+
+echo "LilHouse router-deploy verification"
+echo "  router env: $ROUTER_ENV"
+echo "  WAN: ${WAN:-missing}"
+echo "  LAN: ${LAN:-missing}"
+echo "  LAN IP: ${LAN_IP:-missing}"
+echo "  LAN net: ${LAN_NET:-missing}"
+echo
+
+[ -n "$WAN" ] && pass "WAN configured: $WAN" || fail "WAN missing in router env"
+[ -n "$LAN" ] && pass "LAN configured: $LAN" || fail "LAN missing in router env"
+[ -n "$LAN_IP" ] && pass "LAN_IP configured: $LAN_IP" || fail "LAN_IP missing in router env"
+[ -n "$LAN_NET" ] && pass "LAN_NET configured: $LAN_NET" || fail "LAN_NET missing in router env"
+
+need_cmd ip
+need_cmd grep
+need_cmd awk
+
+if command -v nft >/dev/null 2>&1 || [ -n "$NFT_RULES_FILE" ]; then
+  pass "nftables rules can be inspected"
+else
+  fail "missing command: nft"
+fi
+
+if [ "$SKIP_DNS" -ne 1 ]; then
+  need_cmd dig
+fi
+
+if [ -n "$WAN" ]; then
+  if ip link show "$WAN" >/dev/null 2>&1; then
+    pass "WAN interface exists: $WAN"
+  else
+    fail "WAN interface missing: $WAN"
+  fi
+fi
+
+if [ -n "$LAN" ]; then
+  if ip link show "$LAN" >/dev/null 2>&1; then
+    pass "LAN interface exists: $LAN"
+  else
+    fail "LAN interface missing: $LAN"
+  fi
+fi
+
+if [ "$SKIP_LAN_IP" -ne 1 ] && [ -n "$LAN" ] && [ -n "$LAN_IP" ]; then
+  if ip -4 addr show dev "$LAN" | grep -q " $LAN_IP/"; then
+    pass "LAN IP active on $LAN: $LAN_IP"
+  else
+    fail "LAN IP not active on $LAN: $LAN_IP"
+  fi
+fi
+
+if [ -f "$IP_FORWARD_FILE" ]; then
+  if [ "$(cat "$IP_FORWARD_FILE" 2>/dev/null)" = "1" ]; then
+    pass "IPv4 forwarding enabled"
+  else
+    fail "IPv4 forwarding is not enabled"
+  fi
+else
+  fail "IPv4 forwarding file missing: $IP_FORWARD_FILE"
+fi
+
+if [ -n "$NFT_RULES_FILE" ]; then
+  if [ -f "$NFT_RULES_FILE" ]; then
+    NFT_RULES="$(cat "$NFT_RULES_FILE")"
+  else
+    NFT_RULES=""
+    fail "nft rules fixture missing: $NFT_RULES_FILE"
+  fi
+else
+  NFT_RULES="$(nft list ruleset 2>/dev/null || true)"
+fi
+
+if [ -n "$LAN" ] && [ -n "$WAN" ]; then
+  if printf '%s\n' "$NFT_RULES" | grep -Fq "iifname \"$LAN\" oifname \"$WAN\" accept"; then
+    pass "LAN to WAN forwarding rule exists"
+  else
+    fail "LAN to WAN forwarding rule missing"
+  fi
+fi
+
+if [ -n "$LAN_NET" ] && [ -n "$WAN" ]; then
+  if printf '%s\n' "$NFT_RULES" | grep -Fq "oifname \"$WAN\" ip saddr $LAN_NET masquerade"; then
+    pass "NAT masquerade exists for $LAN_NET via $WAN"
+  else
+    fail "NAT masquerade missing for $LAN_NET via $WAN"
+  fi
+fi
+
+if [ "$SKIP_SERVICES" -ne 1 ]; then
+  if systemctl is-active --quiet nftables; then
+    pass "nftables service active"
+  else
+    fail "nftables service not active"
+  fi
+
+  if systemctl is-active --quiet pihole-FTL; then
+    pass "Pi-hole FTL service active"
+  else
+    fail "Pi-hole FTL service not active"
+  fi
+
+  if systemctl is-active --quiet unbound; then
+    pass "Unbound service active"
+  else
+    fail "Unbound service not active"
+  fi
+fi
+
+if command -v pihole-FTL >/dev/null 2>&1; then
+  DHCP_ACTIVE="$(pihole-FTL --config dhcp.active 2>/dev/null | awk '{print $NF}' | tail -n 1 || true)"
+  DHCP_ROUTER="$(pihole-FTL --config dhcp.router 2>/dev/null | awk '{print $NF}' | tail -n 1 || true)"
+
+  if [ "$DHCP_ACTIVE" = "true" ] || [ "$DHCP_ACTIVE" = "1" ]; then
+    pass "Pi-hole DHCP active"
+  else
+    fail "Pi-hole DHCP inactive"
+  fi
+
+  if [ -n "$LAN_IP" ] && [ "$DHCP_ROUTER" = "$LAN_IP" ]; then
+    pass "Pi-hole DHCP router matches LAN IP"
+  else
+    fail "Pi-hole DHCP router does not match LAN IP"
+  fi
+elif [ "$SKIP_SERVICES" -ne 1 ]; then
+  fail "pihole-FTL command missing"
+fi
+
+if [ "$SKIP_DNS" -ne 1 ] && [ -n "$LAN_IP" ]; then
+  DNS_TMP="/tmp/lilhouse-router-deploy-verify-dns.$$"
+  if dig +time=2 +tries=1 @"$LAN_IP" example.com A +short >"$DNS_TMP" 2>/dev/null && [ -s "$DNS_TMP" ]; then
+    pass "DNS answers on LAN IP"
+  else
+    fail "DNS did not answer on LAN IP"
+  fi
+  rm -f "$DNS_TMP"
+fi
+
+echo
+if [ "$fail_count" -eq 0 ]; then
+  echo "Router-deploy verification passed."
+  exit 0
+fi
+
+echo "Router-deploy verification failed: $fail_count check(s) failed."
+exit 1

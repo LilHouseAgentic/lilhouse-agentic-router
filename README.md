@@ -274,3 +274,13 @@ Use the dry-run wizard first when unsure:
 ```bash
 ./install.sh --mode router-deploy --wizard --dry-run --wan eth0 --lan eth1
 ```
+
+## Router-deploy verification
+
+Router-deploy runs verification after appliance install. Manual verification is also available:
+
+```bash
+sudo lilhouse-router-deploy-verify --yes
+```
+
+Verification checks LAN config, forwarding, nftables forwarding/NAT, Pi-hole DHCP, Unbound, and DNS response on the LAN IP.

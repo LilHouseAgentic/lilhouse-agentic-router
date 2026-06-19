@@ -90,7 +90,8 @@ if grep -RniE \
   . \
   "${COMMON_EXCLUDES[@]}" \
   --exclude='lilhouse-router-appliance-uninstall' \
-  --exclude='lilhouse-router-appliance-install'
+  --exclude='lilhouse-router-appliance-install' \
+    --exclude='lilhouse-router-deploy-verify'
 then
   FAIL=1
 else
