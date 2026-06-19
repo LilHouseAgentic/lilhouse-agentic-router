@@ -31,3 +31,13 @@ Dry-run generates a preview and does not install router services.
 ```
 
 Use dry-run to inspect the chosen interfaces and generated router configuration before running router-deploy.
+
+## Router-deploy verification
+
+Router-deploy runs verification after appliance install. Manual verification is also available:
+
+```bash
+sudo lilhouse-router-deploy-verify --yes
+```
+
+Verification checks LAN config, forwarding, nftables forwarding/NAT, Pi-hole DHCP, Unbound, and DNS response on the LAN IP.
